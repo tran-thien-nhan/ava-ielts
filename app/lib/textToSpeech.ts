@@ -11,7 +11,6 @@ let isSpeaking = false;
  */
 function loadVoices(): Promise<SpeechSynthesisVoice[]> {
     return new Promise((resolve) => {
-        // Kiểm tra nếu đã có voices
         const voices = window.speechSynthesis.getVoices();
         
         if (voices.length > 0) {
@@ -21,7 +20,6 @@ function loadVoices(): Promise<SpeechSynthesisVoice[]> {
             return;
         }
 
-        // Set timeout để tránh treo vô hạn
         const timeout = setTimeout(() => {
             if (!voicesLoaded) {
                 console.warn("Voice loading timeout");
@@ -30,7 +28,6 @@ function loadVoices(): Promise<SpeechSynthesisVoice[]> {
             }
         }, 3000);
 
-        // Nếu chưa load, chờ event onvoiceschanged
         const onVoicesChanged = () => {
             clearTimeout(timeout);
             availableVoices = window.speechSynthesis.getVoices();
@@ -40,29 +37,27 @@ function loadVoices(): Promise<SpeechSynthesisVoice[]> {
         };
 
         window.speechSynthesis.onvoiceschanged = onVoicesChanged;
-        
-        // Trigger load voices
         window.speechSynthesis.getVoices();
     });
 }
 
 /**
- * Chọn giọng nói tiếng Anh tốt nhất
+ * Chọn giọng nói tiếng Anh tốt nhất - ưu tiên giọng to và rõ
  */
 function getBestEnglishVoice(): SpeechSynthesisVoice | null {
     if (!voicesLoaded || availableVoices.length === 0) return null;
 
-    // Thứ tự ưu tiên giọng
+    // Thứ tự ưu tiên giọng (giọng Google US English thường to và rõ nhất)
     const priorityList = [
-        'Google US English',
-        'Samantha',
-        'Microsoft Zira',
+        'Google US English',      // Ưu tiên hàng đầu - to và rõ
+        'Microsoft Zira',         // Giọng nữ Windows - to
+        'Microsoft David',        // Giọng nam Windows
+        'Samantha',               // Giọng macOS - to
+        'Alex',                   // Giọng macOS
         'Google UK English Female',
         'Google UK English Male',
         'Karen',
         'Daniel',
-        'Microsoft David',
-        'Alex',
         'en-US',
         'en-GB'
     ];
@@ -99,15 +94,14 @@ async function processQueue(): Promise<void> {
         console.error("Error speaking text:", error);
     } finally {
         isSpeaking = false;
-        // Xử lý tiếp queue nếu còn
         if (speechQueue.length > 0) {
-            setTimeout(() => processQueue(), 100);
+            setTimeout(() => processQueue(), 150);
         }
     }
 }
 
 /**
- * Phát text bằng Web Speech API
+ * Phát text bằng Web Speech API - TĂNG ÂM LƯỢNG
  */
 function speakText(text: string): Promise<void> {
     return new Promise((resolve, reject) => {
@@ -127,20 +121,29 @@ function speakText(text: string): Promise<void> {
 
         const utterance = new SpeechSynthesisUtterance(text);
         
-        // Cấu hình
+        // === CẤU HÌNH TỐI ƯU CHO MOBILE ===
         utterance.lang = 'en-US';
-        utterance.rate = 0.9;
-        utterance.pitch = 1.0;
-        utterance.volume = 5.0;
+        utterance.rate = 1.0;      // Chậm hơn một chút để rõ chữ
+        utterance.pitch = 1.0;       // Giọng tự nhiên
+        utterance.volume = 1.0;      // Volume tối đa (1.0 là max)
+        
+        // Ghi đè volume nếu browser hỗ trợ (một số browser cho phép >1)
+        // @ts-ignore - Một số browser hỗ trợ volume > 1
+        if (utterance.volume !== undefined) {
+            // @ts-ignore
+            utterance.volume = 1.0;
+        }
 
-        // Set voice nếu có
+        // Set voice nếu có (ưu tiên giọng to)
         const bestVoice = getBestEnglishVoice();
         if (bestVoice) {
             utterance.voice = bestVoice;
+            console.log(`🎤 Using voice: ${bestVoice.name} (${bestVoice.lang})`);
         }
 
         // Event handlers
         utterance.onend = () => {
+            console.log("✅ Speech ended");
             currentUtterance = null;
             resolve();
         };
@@ -149,12 +152,15 @@ function speakText(text: string): Promise<void> {
             console.error("Speech error:", event.error);
             currentUtterance = null;
             
-            // Một số lỗi có thể thử lại
             if (event.error === 'interrupted' || event.error === 'network') {
                 console.log("Retrying...");
                 setTimeout(() => {
                     speakText(text).then(resolve).catch(reject);
-                }, 200);
+                }, 300);
+            } else if (event.error === 'not-allowed') {
+                // User chưa tương tác với trang
+                console.warn("Speech not allowed. User needs to interact first.");
+                reject(new Error("not-allowed"));
             } else {
                 reject(new Error(event.error));
             }
@@ -173,7 +179,7 @@ function speakText(text: string): Promise<void> {
 }
 
 /**
- * Phát âm thanh tiếng Anh (sử dụng queue)
+ * Phát âm thanh tiếng Anh (sử dụng queue) - PHIÊN BẢN MOBILE
  */
 export async function playAudio(text: string): Promise<void> {
     if (!text || text.trim() === "") {
@@ -188,7 +194,6 @@ export async function playAudio(text: string): Promise<void> {
 
     if (!('speechSynthesis' in window)) {
         console.warn("Browser does not support Web Speech API");
-        // Có thể thông báo nhẹ nhàng hơn
         return;
     }
 
@@ -197,6 +202,9 @@ export async function playAudio(text: string): Promise<void> {
         if (!voicesLoaded) {
             await loadVoices();
         }
+
+        // Log để debug
+        console.log(`🔊 Playing: "${text.substring(0, 50)}..."`);
 
         // Thêm vào queue
         speechQueue.push(text.trim());
@@ -233,7 +241,7 @@ export function isSpeechSupported(): boolean {
 }
 
 /**
- * Phát âm thanh và trả về promise (không dùng queue)
+ * Phát âm thanh và trả về promise (không dùng queue) - Dùng cho manual play
  */
 export async function playAudioImmediate(text: string): Promise<void> {
     if (!text || text.trim() === "") {
@@ -252,12 +260,12 @@ export async function playAudioImmediate(text: string): Promise<void> {
         // Cancel current speech
         window.speechSynthesis.cancel();
         
-        // Delay nhỏ để cancel hoàn tất
-        await new Promise(resolve => setTimeout(resolve, 50));
+        // Delay để cancel hoàn tất
+        await new Promise(resolve => setTimeout(resolve, 80));
 
         const utterance = new SpeechSynthesisUtterance(text.trim());
         utterance.lang = 'en-US';
-        utterance.rate = 0.9;
+        utterance.rate = 0.85;
         utterance.pitch = 1.0;
         utterance.volume = 1.0;
 
