@@ -9,14 +9,27 @@ interface FlashcardProps {
     card: VocabularyCard;
     onNext: () => void;
     onPrev: () => void;
+    onShuffle: () => void;
     hasNext: boolean;
     hasPrev: boolean;
+    totalCards: number;
+    currentIndex: number;
 }
 
-export default function Flashcard({ card, onNext, onPrev, hasNext, hasPrev }: FlashcardProps) {
+export default function Flashcard({ 
+    card, 
+    onNext, 
+    onPrev, 
+    onShuffle,
+    hasNext, 
+    hasPrev,
+    totalCards,
+    currentIndex
+}: FlashcardProps) {
     const [isFlipped, setIsFlipped] = useState(false);
     const [isPlaying, setIsPlaying] = useState(false);
-    const hasAutoPlayedRef = useRef(false); // Đánh dấu đã tự động phát cho thẻ hiện tại
+    const [isShuffling, setIsShuffling] = useState(false);
+    const hasAutoPlayedRef = useRef(false);
     const audioTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     const isMountedRef = useRef(true);
     const currentCardIdRef = useRef<string>("");
@@ -36,16 +49,12 @@ export default function Flashcard({ card, onNext, onPrev, hasNext, hasPrev }: Fl
     // Reset khi đổi thẻ
     useEffect(() => {
         if (card && card.id) {
-            // Reset states
             setIsFlipped(false);
             setIsPlaying(false);
-            hasAutoPlayedRef.current = false; // Reset flag khi đổi thẻ
+            hasAutoPlayedRef.current = false;
             currentCardIdRef.current = card.id;
-            
-            // Dừng audio đang phát
             stopAudio();
             
-            // Clear timeouts
             if (audioTimeoutRef.current) {
                 clearTimeout(audioTimeoutRef.current);
                 audioTimeoutRef.current = null;
@@ -55,28 +64,20 @@ export default function Flashcard({ card, onNext, onPrev, hasNext, hasPrev }: Fl
 
     const handlePlayAudio = useCallback(async (isAutoPlay = false) => {
         if (!card || !card.english || isPlaying) return;
-
-        // Nếu là auto play và đã phát rồi thì không phát nữa
         if (isAutoPlay && hasAutoPlayedRef.current) return;
 
         setIsPlaying(true);
-        
-        // Dừng audio cũ trước khi phát mới
         stopAudio();
-        
-        // Delay nhỏ để cancel hoàn tất
         await new Promise(resolve => setTimeout(resolve, 100));
 
         try {
             await playAudio(card.english);
-            // Đánh dấu đã phát (chỉ cho auto play)
             if (isAutoPlay) {
                 hasAutoPlayedRef.current = true;
             }
         } catch (error) {
             console.error("Error playing audio:", error);
         } finally {
-            // Chỉ reset state nếu component còn mounted
             if (isMountedRef.current) {
                 if (audioTimeoutRef.current) {
                     clearTimeout(audioTimeoutRef.current);
@@ -94,28 +95,40 @@ export default function Flashcard({ card, onNext, onPrev, hasNext, hasPrev }: Fl
         setIsFlipped(prev => !prev);
     }, []);
 
-    // Tự động phát âm khi lật sang mặt sau (CHỈ MỘT LẦN DUY NHẤT)
+    // Tự động phát âm khi lật sang mặt sau
     useEffect(() => {
-        // Chỉ phát khi: đang ở mặt sau, có nội dung tiếng Anh, chưa phát cho thẻ này
         if (isFlipped && card && card.english && !hasAutoPlayedRef.current && !isPlaying) {
-            // Delay nhỏ để tránh xung đột
             const timer = setTimeout(() => {
                 if (isFlipped && card?.english && !hasAutoPlayedRef.current && !isPlaying && isMountedRef.current) {
-                    handlePlayAudio(true); // true = auto play
+                    handlePlayAudio(true);
                 }
             }, 150);
-            
             return () => clearTimeout(timer);
         }
     }, [isFlipped, card, isPlaying, handlePlayAudio]);
 
     const handleManualPlayAudio = useCallback(() => {
-        // Phát thủ công - không ảnh hưởng đến auto play flag
         handlePlayAudio(false);
     }, [handlePlayAudio]);
 
+    const handleShuffle = useCallback(async () => {
+        if (isShuffling) return;
+        
+        setIsShuffling(true);
+        // Dừng audio đang phát
+        stopAudio();
+        
+        // Hiệu ứng xáo trộn
+        await new Promise(resolve => setTimeout(resolve, 150));
+        
+        onShuffle();
+        
+        setTimeout(() => {
+            setIsShuffling(false);
+        }, 300);
+    }, [onShuffle, isShuffling]);
+
     const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
-        // Ngăn chặn scroll khi dùng phím space
         if (e.key === " " || e.key === "Spacebar" || e.key === "Space") {
             e.preventDefault();
             handleFlip();
@@ -128,10 +141,12 @@ export default function Flashcard({ card, onNext, onPrev, hasNext, hasPrev }: Fl
         } else if (e.key.toLowerCase() === "a") {
             e.preventDefault();
             handleManualPlayAudio();
+        } else if (e.key.toLowerCase() === "s") {
+            e.preventDefault();
+            handleShuffle();
         }
-    }, [hasPrev, hasNext, onPrev, onNext, handleFlip, handleManualPlayAudio]);
+    }, [hasPrev, hasNext, onPrev, onNext, handleFlip, handleManualPlayAudio, handleShuffle]);
 
-    // Nếu không có card, hiển thị loading
     if (!card || !card.id) {
         return (
             <div className="flex flex-col items-center justify-center min-h-screen p-4 sm:p-6 bg-zinc-950">
@@ -150,6 +165,36 @@ export default function Flashcard({ card, onNext, onPrev, hasNext, hasPrev }: Fl
             tabIndex={0}
         >
             <div className="w-full max-w-2xl">
+                {/* Header với thông tin và nút xáo trộn */}
+                <div className="flex justify-between items-center mb-4 px-2">
+                    <div className="text-zinc-400 text-sm">
+                        {currentIndex + 1} / {totalCards}
+                    </div>
+                    <button
+                        onClick={handleShuffle}
+                        disabled={isShuffling || totalCards <= 1}
+                        className={`px-4 py-2 rounded-xl transition-all flex items-center gap-2 text-sm font-medium ${
+                            isShuffling || totalCards <= 1
+                                ? "bg-zinc-800 text-zinc-500 cursor-not-allowed"
+                                : "bg-orange-600 hover:bg-orange-500 text-white active:scale-95"
+                        }`}
+                    >
+                        {isShuffling ? (
+                            <>
+                                <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24">
+                                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                                </svg>
+                                Đang xáo...
+                            </>
+                        ) : (
+                            <>
+                                🔀 Xáo trộn
+                            </>
+                        )}
+                    </button>
+                </div>
+
                 {/* Flip Card Container */}
                 <div
                     className={`flip-card ${isFlipped ? "flipped" : ""} cursor-pointer`}
@@ -259,7 +304,7 @@ export default function Flashcard({ card, onNext, onPrev, hasNext, hasPrev }: Fl
 
                 {/* Tips */}
                 <div className="text-center mt-6 sm:mt-8 text-zinc-500 text-xs sm:text-sm px-2">
-                    💡 ← → chuyển • Space lật • A nghe
+                    💡 ← → chuyển • Space lật • A nghe • S xáo trộn
                 </div>
             </div>
         </div>
