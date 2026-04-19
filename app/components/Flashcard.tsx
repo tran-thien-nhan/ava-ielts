@@ -17,21 +17,23 @@ export default function Flashcard({ card, onNext, onPrev, hasNext, hasPrev }: Fl
     const [isFlipped, setIsFlipped] = useState(false);
     const [isPlaying, setIsPlaying] = useState(false);
 
-    // Reset khi đổi thẻ
+    // Reset khi đổi thẻ - Kiểm tra card tồn tại
     useEffect(() => {
-        setIsFlipped(false);
-        setIsPlaying(false);
-    }, [card.id]);
+        if (card && card.id) {
+            setIsFlipped(false);
+            setIsPlaying(false);
+        }
+    }, [card?.id]);
 
     // Tự động phát âm khi lật sang mặt sau (mặt tiếng Anh)
     useEffect(() => {
-        if (isFlipped && card.english) {
+        if (isFlipped && card && card.english) {
             handlePlayAudio();
         }
-    }, [isFlipped]);
+    }, [isFlipped, card]);
 
     const handlePlayAudio = async () => {
-        if (!card.english || isPlaying) return;
+        if (!card || !card.english || isPlaying) return;
 
         setIsPlaying(true);
 
@@ -51,7 +53,7 @@ export default function Flashcard({ card, onNext, onPrev, hasNext, hasPrev }: Fl
     const handleKeyDown = (e: React.KeyboardEvent) => {
         if (e.key === "ArrowLeft" && hasPrev) onPrev();
         else if (e.key === "ArrowRight" && hasNext) onNext();
-        else if (e.key === " " || e.key === "Spacebar") {
+        else if (e.key === " " || e.key === "Spacebar" || e.key === "Space") {
             e.preventDefault();
             handleFlip();
         } else if (e.key.toLowerCase() === "a") {
@@ -59,8 +61,19 @@ export default function Flashcard({ card, onNext, onPrev, hasNext, hasPrev }: Fl
         }
     };
 
+    // Nếu không có card, hiển thị loading hoặc thông báo
+    if (!card || !card.id) {
+        return (
+            <div className="flex flex-col items-center justify-center min-h-screen p-6 bg-zinc-950">
+                <div className="text-center">
+                    <div className="text-white text-xl">Đang tải...</div>
+                </div>
+            </div>
+        );
+    }
+
     return (
-        <div className="flex flex-col items-center justify-center min-h-screen p-6 bg-zinc-950">
+        <div className="flex flex-col items-center justify-center min-h-screen p-6 bg-zinc-950" onKeyDown={handleKeyDown} tabIndex={0}>
             <div className="w-full max-w-2xl">
                 {/* Flip Card Container */}
                 <div
@@ -75,7 +88,7 @@ export default function Flashcard({ card, onNext, onPrev, hasNext, hasPrev }: Fl
                             <div className="relative h-full flex flex-col items-center justify-center p-10 text-center">
                                 <div className="text-6xl mb-8 opacity-80">📘</div>
                                 <h2 className="text-4xl md:text-5xl font-bold text-white leading-tight tracking-tight">
-                                    {card.vietnamese}
+                                    {card.vietnamese || "???"}
                                 </h2>
                                 <div className="mt-12 text-zinc-400 text-sm flex items-center gap-2">
                                     👆 Nhấn hoặc nhấn <span className="font-mono bg-zinc-800 px-2 py-0.5 rounded">Space</span> để lật
@@ -90,7 +103,7 @@ export default function Flashcard({ card, onNext, onPrev, hasNext, hasPrev }: Fl
                                 <div className="text-6xl mb-6 opacity-70">🔤</div>
                                 
                                 <h2 className="text-4xl md:text-5xl font-bold text-white leading-tight tracking-tight mb-10">
-                                    {card.english}
+                                    {card.english || "???"}
                                 </h2>
 
                                 <button

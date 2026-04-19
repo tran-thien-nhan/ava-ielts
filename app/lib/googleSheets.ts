@@ -1,4 +1,6 @@
 // app/lib/googleSheets.ts
+import 'server-only';
+
 import { google } from "googleapis";
 import { SHEET_HEADERS, VocabularyCard } from "../types";
 
@@ -7,6 +9,14 @@ let cacheTimestamp: number = 0;
 const CACHE_DURATION = 1000 * 60 * 5; // 5 phút
 
 export async function getSheets() {
+    // Kiểm tra environment variables
+    if (!process.env.GOOGLE_CLIENT_EMAIL) {
+        throw new Error("Missing GOOGLE_CLIENT_EMAIL environment variable");
+    }
+    if (!process.env.GOOGLE_PRIVATE_KEY) {
+        throw new Error("Missing GOOGLE_PRIVATE_KEY environment variable");
+    }
+    
     const auth = new google.auth.GoogleAuth({
         credentials: {
             client_email: process.env.GOOGLE_CLIENT_EMAIL,
@@ -28,7 +38,6 @@ function rowToCard(row: string[]): VocabularyCard {
         id: row[0] || "",
         vietnamese: row[1] || "",
         english: row[2] || "",
-        // audioUrl bị xóa
         createdAt: row[3] || new Date().toISOString(),
         updatedAt: row[4] || new Date().toISOString(),
     };
@@ -51,11 +60,17 @@ export async function getAllCards(): Promise<VocabularyCard[]> {
         return sheetDataCache;
     }
 
+    // Kiểm tra spreadsheetId
+    const spreadsheetId = process.env.SPREADSHEET_ID || "1kp19fVAyAu6wDK9kvSNs4n5YacSSWXjT2VESiXHpcZ8";
+    if (!spreadsheetId) {
+        console.error("SPREADSHEET_ID is not defined in environment variables");
+        return [];
+    }
+
     const sheets = await getSheets();
-    const spreadsheetId = process.env.SPREADSHEET_ID!;
 
     try {
-        // Kiểm tra và tạo header nếu chưa có (chỉ còn 5 cột)
+        // Kiểm tra và tạo header nếu chưa có
         const headerCheck = await sheets.spreadsheets.values.get({
             spreadsheetId,
             range: "Sheet1!A1:E1",
@@ -93,8 +108,12 @@ export async function getAllCards(): Promise<VocabularyCard[]> {
 }
 
 export async function addCard(card: VocabularyCard): Promise<VocabularyCard> {
+    const spreadsheetId = process.env.SPREADSHEET_ID;
+    if (!spreadsheetId) {
+        throw new Error("SPREADSHEET_ID is not defined");
+    }
+    
     const sheets = await getSheets();
-    const spreadsheetId = process.env.SPREADSHEET_ID!;
 
     const newCard: VocabularyCard = {
         ...card,
@@ -115,8 +134,12 @@ export async function addCard(card: VocabularyCard): Promise<VocabularyCard> {
 }
 
 export async function updateCard(card: VocabularyCard): Promise<VocabularyCard> {
+    const spreadsheetId = process.env.SPREADSHEET_ID;
+    if (!spreadsheetId) {
+        throw new Error("SPREADSHEET_ID is not defined");
+    }
+    
     const sheets = await getSheets();
-    const spreadsheetId = process.env.SPREADSHEET_ID!;
 
     const cards = await getAllCards();
     const rowIndex = cards.findIndex((c) => c.id === card.id);
@@ -142,8 +165,12 @@ export async function updateCard(card: VocabularyCard): Promise<VocabularyCard> 
 }
 
 export async function deleteCard(id: string): Promise<void> {
+    const spreadsheetId = process.env.SPREADSHEET_ID;
+    if (!spreadsheetId) {
+        throw new Error("SPREADSHEET_ID is not defined");
+    }
+    
     const sheets = await getSheets();
-    const spreadsheetId = process.env.SPREADSHEET_ID!;
 
     const cards = await getAllCards();
     const rowIndex = cards.findIndex((c) => c.id === id);
@@ -174,19 +201,22 @@ export async function deleteCard(id: string): Promise<void> {
 export async function deleteMultipleCards(ids: string[]): Promise<void> {
     if (ids.length === 0) return;
 
+    const spreadsheetId = process.env.SPREADSHEET_ID;
+    if (!spreadsheetId) {
+        throw new Error("SPREADSHEET_ID is not defined");
+    }
+    
     const sheets = await getSheets();
-    const spreadsheetId = process.env.SPREADSHEET_ID!;
 
     const allCards = await getAllCards();
 
-    // Tìm vị trí các dòng cần xóa (phải sắp xếp giảm dần để xóa từ dưới lên)
     const rowsToDelete = ids
         .map(id => {
             const index = allCards.findIndex(card => card.id === id);
-            return index !== -1 ? index + 1 : -1; // +1 vì header ở dòng 1
+            return index !== -1 ? index + 1 : -1;
         })
         .filter(index => index !== -1)
-        .sort((a, b) => b - a); // Sắp xếp giảm dần để xóa từ dưới lên tránh lệch index
+        .sort((a, b) => b - a);
 
     if (rowsToDelete.length === 0) return;
 
