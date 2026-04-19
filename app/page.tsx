@@ -44,15 +44,26 @@ export default function Home() {
         }
     };
 
-    const handleShuffle = () => {
+    // SỬA: Hàm xáo trộn - tạo mảng mới và cập nhật state
+    const handleShuffle = useCallback(() => {
+        if (cards.length <= 1) return;
+        
+        // Tạo bản sao của mảng cards
         const shuffled = [...cards];
+        
+        // Thuật toán Fisher-Yates shuffle
         for (let i = shuffled.length - 1; i > 0; i--) {
             const j = Math.floor(Math.random() * (i + 1));
             [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
         }
+        
+        // Cập nhật state với mảng đã xáo trộn
         setCards(shuffled);
+        // Reset về thẻ đầu tiên sau khi xáo trộn
         setCurrentIndex(0);
-    };
+        
+        console.log("Đã xáo trộn", cards.length, "thẻ");
+    }, [cards]);
 
     const handleAddCard = async (cardData: Partial<VocabularyCard>) => {
         try {
@@ -110,7 +121,6 @@ export default function Home() {
         }
     };
 
-    // Hàm xóa hàng loạt
     const handleBulkDelete = async (ids: string[]) => {
         try {
             const response = await fetch(`/api/cards?ids=${JSON.stringify(ids)}`, { 
@@ -148,21 +158,21 @@ export default function Home() {
 
     if (loading) {
         return (
-            <div className="min-h-screen flex items-center justify-center">
+            <div className="min-h-screen flex items-center justify-center bg-zinc-950">
                 <div className="text-white text-xl">Đang tải dữ liệu...</div>
             </div>
         );
     }
 
     return (
-        <div className="min-h-screen p-4 bg-zinc-900 border border-zinc-800">
+        <div className="min-h-screen p-4 bg-zinc-950">
             <div className="flex justify-between items-center mb-4">
                 <h1 className="text-3xl md:text-4xl font-bold text-white drop-shadow-lg">
                     📚 Học Từ Vựng Flashcard
                 </h1>
                 <button
                     onClick={() => setShowManager(!showManager)}
-                    className="px-4 py-2 bg-white/20 hover:bg-white/30 text-white rounded-lg transition-all duration-300"
+                    className="px-4 py-2 bg-white/10 hover:bg-white/20 text-white rounded-lg transition-all duration-300 backdrop-blur-sm"
                 >
                     {showManager ? "🎴 Học ngay" : "📋 Quản lý"}
                 </button>
@@ -194,15 +204,12 @@ export default function Home() {
                     card={cards[currentIndex]}
                     onNext={handleNext}
                     onPrev={handlePrev}
+                    onShuffle={handleShuffle}
                     hasNext={currentIndex < cards.length - 1}
                     hasPrev={currentIndex > 0}
+                    totalCards={cards.length}
+                    currentIndex={currentIndex}
                 />
-            )}
-
-            {!showManager && cards.length > 0 && (
-                <div className="fixed bottom-4 right-4 bg-white/20 backdrop-blur-lg rounded-full px-4 py-2 text-white text-sm">
-                    {currentIndex + 1} / {cards.length}
-                </div>
             )}
 
             <CardModal
