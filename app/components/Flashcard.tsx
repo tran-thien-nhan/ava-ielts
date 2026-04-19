@@ -29,10 +29,9 @@ export default function Flashcard({
     const [isFlipped, setIsFlipped] = useState(false);
     const [isPlaying, setIsPlaying] = useState(false);
     const [isShuffling, setIsShuffling] = useState(false);
-    const hasAutoPlayedRef = useRef(false);
     const audioTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     const isMountedRef = useRef(true);
-    const currentCardIdRef = useRef<string>("");
+    const lastFlippedStateRef = useRef(false); // Theo dõi trạng thái lật trước đó
 
     // Cleanup khi unmount
     useEffect(() => {
@@ -51,8 +50,7 @@ export default function Flashcard({
         if (card && card.id) {
             setIsFlipped(false);
             setIsPlaying(false);
-            hasAutoPlayedRef.current = false;
-            currentCardIdRef.current = card.id;
+            lastFlippedStateRef.current = false;
             stopAudio();
             
             if (audioTimeoutRef.current) {
@@ -62,9 +60,8 @@ export default function Flashcard({
         }
     }, [card?.id]);
 
-    const handlePlayAudio = useCallback(async (isAutoPlay = false) => {
+    const handlePlayAudio = useCallback(async () => {
         if (!card || !card.english || isPlaying) return;
-        if (isAutoPlay && hasAutoPlayedRef.current) return;
 
         setIsPlaying(true);
         stopAudio();
@@ -72,9 +69,6 @@ export default function Flashcard({
 
         try {
             await playAudio(card.english);
-            if (isAutoPlay) {
-                hasAutoPlayedRef.current = true;
-            }
         } catch (error) {
             console.error("Error playing audio:", error);
         } finally {
@@ -95,32 +89,31 @@ export default function Flashcard({
         setIsFlipped(prev => !prev);
     }, []);
 
-    // Tự động phát âm khi lật sang mặt sau
+    // Tự động phát âm khi lật sang mặt sau - MỖI LẦN ĐỀU PHÁT
     useEffect(() => {
-        if (isFlipped && card && card.english && !hasAutoPlayedRef.current && !isPlaying) {
+        // Kiểm tra: đang ở mặt sau, có nội dung, và vừa chuyển từ mặt trước sang mặt sau
+        if (isFlipped && card && card.english && !isPlaying && !lastFlippedStateRef.current) {
             const timer = setTimeout(() => {
-                if (isFlipped && card?.english && !hasAutoPlayedRef.current && !isPlaying && isMountedRef.current) {
-                    handlePlayAudio(true);
+                if (isFlipped && card?.english && !isPlaying && isMountedRef.current) {
+                    handlePlayAudio();
                 }
             }, 150);
             return () => clearTimeout(timer);
         }
+        // Cập nhật trạng thái lật trước đó
+        lastFlippedStateRef.current = isFlipped;
     }, [isFlipped, card, isPlaying, handlePlayAudio]);
 
     const handleManualPlayAudio = useCallback(() => {
-        handlePlayAudio(false);
+        handlePlayAudio();
     }, [handlePlayAudio]);
 
     const handleShuffle = useCallback(async () => {
         if (isShuffling) return;
         
         setIsShuffling(true);
-        // Dừng audio đang phát
         stopAudio();
-        
-        // Hiệu ứng xáo trộn
         await new Promise(resolve => setTimeout(resolve, 150));
-        
         onShuffle();
         
         setTimeout(() => {
@@ -304,7 +297,7 @@ export default function Flashcard({
 
                 {/* Tips */}
                 <div className="text-center mt-6 sm:mt-8 text-zinc-500 text-xs sm:text-sm px-2">
-                    💡 ← → chuyển • Space lật • A nghe • S xáo trộn
+                    💡 ← → chuyển • Space lật (tự động đọc) • A nghe lại • S xáo trộn
                 </div>
             </div>
         </div>
