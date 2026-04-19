@@ -54,13 +54,13 @@ function getBestEnglishVoice(): SpeechSynthesisVoice | null {
 
     // Thứ tự ưu tiên giọng
     const priorityList = [
-        'Google UK English Female',
-        'Google UK English Male',
         'Google US English',
         'Samantha',
+        'Microsoft Zira',
+        'Google UK English Female',
+        'Google UK English Male',
         'Karen',
         'Daniel',
-        'Microsoft Zira',
         'Microsoft David',
         'Alex',
         'en-US',

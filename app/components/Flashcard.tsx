@@ -16,9 +16,10 @@ interface FlashcardProps {
 export default function Flashcard({ card, onNext, onPrev, hasNext, hasPrev }: FlashcardProps) {
     const [isFlipped, setIsFlipped] = useState(false);
     const [isPlaying, setIsPlaying] = useState(false);
+    const hasAutoPlayedRef = useRef(false); // Đánh dấu đã tự động phát cho thẻ hiện tại
     const audioTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     const isMountedRef = useRef(true);
-    const flipTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+    const currentCardIdRef = useRef<string>("");
 
     // Cleanup khi unmount
     useEffect(() => {
@@ -27,9 +28,6 @@ export default function Flashcard({ card, onNext, onPrev, hasNext, hasPrev }: Fl
             isMountedRef.current = false;
             if (audioTimeoutRef.current) {
                 clearTimeout(audioTimeoutRef.current);
-            }
-            if (flipTimeoutRef.current) {
-                clearTimeout(flipTimeoutRef.current);
             }
             stopAudio();
         };
@@ -41,6 +39,8 @@ export default function Flashcard({ card, onNext, onPrev, hasNext, hasPrev }: Fl
             // Reset states
             setIsFlipped(false);
             setIsPlaying(false);
+            hasAutoPlayedRef.current = false; // Reset flag khi đổi thẻ
+            currentCardIdRef.current = card.id;
             
             // Dừng audio đang phát
             stopAudio();
@@ -50,15 +50,14 @@ export default function Flashcard({ card, onNext, onPrev, hasNext, hasPrev }: Fl
                 clearTimeout(audioTimeoutRef.current);
                 audioTimeoutRef.current = null;
             }
-            if (flipTimeoutRef.current) {
-                clearTimeout(flipTimeoutRef.current);
-                flipTimeoutRef.current = null;
-            }
         }
     }, [card?.id]);
 
-    const handlePlayAudio = useCallback(async () => {
+    const handlePlayAudio = useCallback(async (isAutoPlay = false) => {
         if (!card || !card.english || isPlaying) return;
+
+        // Nếu là auto play và đã phát rồi thì không phát nữa
+        if (isAutoPlay && hasAutoPlayedRef.current) return;
 
         setIsPlaying(true);
         
@@ -70,6 +69,10 @@ export default function Flashcard({ card, onNext, onPrev, hasNext, hasPrev }: Fl
 
         try {
             await playAudio(card.english);
+            // Đánh dấu đã phát (chỉ cho auto play)
+            if (isAutoPlay) {
+                hasAutoPlayedRef.current = true;
+            }
         } catch (error) {
             console.error("Error playing audio:", error);
         } finally {
@@ -91,26 +94,25 @@ export default function Flashcard({ card, onNext, onPrev, hasNext, hasPrev }: Fl
         setIsFlipped(prev => !prev);
     }, []);
 
-    // Tự động phát âm khi lật sang mặt sau
+    // Tự động phát âm khi lật sang mặt sau (CHỈ MỘT LẦN DUY NHẤT)
     useEffect(() => {
-        if (isFlipped && card && card.english && !isPlaying) {
+        // Chỉ phát khi: đang ở mặt sau, có nội dung tiếng Anh, chưa phát cho thẻ này
+        if (isFlipped && card && card.english && !hasAutoPlayedRef.current && !isPlaying) {
             // Delay nhỏ để tránh xung đột
-            if (flipTimeoutRef.current) {
-                clearTimeout(flipTimeoutRef.current);
-            }
-            flipTimeoutRef.current = setTimeout(() => {
-                if (isFlipped && card?.english && !isPlaying && isMountedRef.current) {
-                    handlePlayAudio();
+            const timer = setTimeout(() => {
+                if (isFlipped && card?.english && !hasAutoPlayedRef.current && !isPlaying && isMountedRef.current) {
+                    handlePlayAudio(true); // true = auto play
                 }
             }, 150);
+            
+            return () => clearTimeout(timer);
         }
-        
-        return () => {
-            if (flipTimeoutRef.current) {
-                clearTimeout(flipTimeoutRef.current);
-            }
-        };
     }, [isFlipped, card, isPlaying, handlePlayAudio]);
+
+    const handleManualPlayAudio = useCallback(() => {
+        // Phát thủ công - không ảnh hưởng đến auto play flag
+        handlePlayAudio(false);
+    }, [handlePlayAudio]);
 
     const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
         // Ngăn chặn scroll khi dùng phím space
@@ -125,9 +127,9 @@ export default function Flashcard({ card, onNext, onPrev, hasNext, hasPrev }: Fl
             onNext();
         } else if (e.key.toLowerCase() === "a") {
             e.preventDefault();
-            handlePlayAudio();
+            handleManualPlayAudio();
         }
-    }, [hasPrev, hasNext, onPrev, onNext, handleFlip, handlePlayAudio]);
+    }, [hasPrev, hasNext, onPrev, onNext, handleFlip, handleManualPlayAudio]);
 
     // Nếu không có card, hiển thị loading
     if (!card || !card.id) {
@@ -185,7 +187,7 @@ export default function Flashcard({ card, onNext, onPrev, hasNext, hasPrev }: Fl
                                 <button
                                     onClick={(e) => {
                                         e.stopPropagation();
-                                        handlePlayAudio();
+                                        handleManualPlayAudio();
                                     }}
                                     disabled={isPlaying}
                                     className="px-6 sm:px-10 py-2.5 sm:py-4 bg-gradient-to-r from-emerald-600 to-teal-600 
@@ -231,7 +233,7 @@ export default function Flashcard({ card, onNext, onPrev, hasNext, hasPrev }: Fl
                     </button>
 
                     <button
-                        onClick={handlePlayAudio}
+                        onClick={handleManualPlayAudio}
                         disabled={isPlaying}
                         className="py-3 sm:py-4 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 
                                    disabled:from-zinc-700 disabled:to-zinc-700 text-white font-semibold text-sm sm:text-lg rounded-xl sm:rounded-2xl 
