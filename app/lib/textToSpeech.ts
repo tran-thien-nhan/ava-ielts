@@ -55,16 +55,7 @@ function getBestEnglishVoice(): SpeechSynthesisVoice | null {
     // Thứ tự ưu tiên giọng
     const priorityList = [
         'Google US English',
-        'Samantha',
-        'Microsoft Zira',
-        'Google UK English Female',
-        'Google UK English Male',
-        'Karen',
-        'Daniel',
         'Microsoft David',
-        'Alex',
-        'en-US',
-        'en-GB'
     ];
 
     for (const name of priorityList) {
