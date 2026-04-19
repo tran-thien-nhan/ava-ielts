@@ -131,7 +131,7 @@ function speakText(text: string): Promise<void> {
         utterance.lang = 'en-US';
         utterance.rate = 0.9;
         utterance.pitch = 1.0;
-        utterance.volume = 1.0;
+        utterance.volume = 5.0;
 
         // Set voice nếu có
         const bestVoice = getBestEnglishVoice();
