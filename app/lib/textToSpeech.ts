@@ -56,6 +56,9 @@ function getBestEnglishVoice(): SpeechSynthesisVoice | null {
     const priorityList = [
         'Google US English',
         'Microsoft David',
+        'Google UK English',
+        'Samantha',
+        'Alex'
     ];
 
     for (const name of priorityList) {
@@ -87,7 +90,10 @@ async function processQueue(): Promise<void> {
     try {
         await speakText(text);
     } catch (error) {
-        console.error("Error speaking text:", error);
+        // Chỉ log lỗi nếu không phải lỗi do cancel
+        if (error !== 'cancelled' && error !== 'interrupted') {
+            console.error("Error speaking text:", error);
+        }
     } finally {
         isSpeaking = false;
         // Xử lý tiếp queue nếu còn
@@ -112,7 +118,7 @@ function speakText(text: string): Promise<void> {
             try {
                 window.speechSynthesis.cancel();
             } catch (e) {
-                console.warn("Error canceling speech:", e);
+                // Bỏ qua lỗi khi cancel
             }
         }
 
@@ -130,24 +136,56 @@ function speakText(text: string): Promise<void> {
             utterance.voice = bestVoice;
         }
 
+        let isResolved = false;
+
         // Event handlers
         utterance.onend = () => {
-            currentUtterance = null;
-            resolve();
+            if (!isResolved) {
+                isResolved = true;
+                currentUtterance = null;
+                resolve();
+            }
         };
 
         utterance.onerror = (event) => {
+            // 'interrupted' là lỗi bình thường khi dừng phát âm, không cần xử lý đặc biệt
+            if (event.error === 'interrupted') {
+                console.log("Speech was interrupted (normal when stopping)");
+                if (!isResolved) {
+                    isResolved = true;
+                    currentUtterance = null;
+                    // Không reject, coi như thành công vì đã dừng theo yêu cầu
+                    resolve();
+                }
+                return;
+            }
+            
+            // 'canceled' cũng là lỗi bình thường khi hủy
+            if (event.error === 'canceled') {
+                console.log("Speech was cancelled");
+                if (!isResolved) {
+                    isResolved = true;
+                    currentUtterance = null;
+                    resolve();
+                }
+                return;
+            }
+            
+            // Các lỗi khác mới log và reject
             console.error("Speech error:", event.error);
             currentUtterance = null;
             
-            // Một số lỗi có thể thử lại
-            if (event.error === 'interrupted' || event.error === 'network') {
-                console.log("Retrying...");
-                setTimeout(() => {
-                    speakText(text).then(resolve).catch(reject);
-                }, 200);
-            } else {
-                reject(new Error(event.error));
+            if (!isResolved) {
+                isResolved = true;
+                // Một số lỗi có thể thử lại (trừ lỗi không phải mạng)
+                if (event.error === 'network') {
+                    console.log("Network error, retrying...");
+                    setTimeout(() => {
+                        speakText(text).then(resolve).catch(reject);
+                    }, 500);
+                } else {
+                    reject(new Error(event.error));
+                }
             }
         };
 
@@ -158,7 +196,10 @@ function speakText(text: string): Promise<void> {
         } catch (error) {
             console.error("Failed to speak:", error);
             currentUtterance = null;
-            reject(error);
+            if (!isResolved) {
+                isResolved = true;
+                reject(error);
+            }
         }
     });
 }
@@ -179,7 +220,6 @@ export async function playAudio(text: string): Promise<void> {
 
     if (!('speechSynthesis' in window)) {
         console.warn("Browser does not support Web Speech API");
-        // Có thể thông báo nhẹ nhàng hơn
         return;
     }
 
@@ -196,7 +236,10 @@ export async function playAudio(text: string): Promise<void> {
         await processQueue();
         
     } catch (error) {
-        console.error("Failed to play audio:", error);
+        // Chỉ log nếu không phải lỗi do cancel/interrupt
+        if (error !== 'cancelled' && error !== 'interrupted') {
+            console.error("Failed to play audio:", error);
+        }
     }
 }
 
@@ -206,8 +249,17 @@ export async function playAudio(text: string): Promise<void> {
 export function stopAudio(): void {
     if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
         try {
+            // Hủy utterance hiện tại
+            if (currentUtterance) {
+                currentUtterance.onend = null;
+                currentUtterance.onerror = null;
+                currentUtterance = null;
+            }
+            
+            // Cancel speech synthesis
             window.speechSynthesis.cancel();
-            currentUtterance = null;
+            
+            // Clear queue
             speechQueue = [];
             isSpeaking = false;
         } catch (error) {
@@ -257,12 +309,32 @@ export async function playAudioImmediate(text: string): Promise<void> {
             utterance.voice = bestVoice;
         }
 
+        let isResolved = false;
+
         return new Promise((resolve, reject) => {
-            utterance.onend = () => resolve();
-            utterance.onerror = (event) => {
-                console.error("Speech error:", event.error);
-                reject(event);
+            utterance.onend = () => {
+                if (!isResolved) {
+                    isResolved = true;
+                    resolve();
+                }
             };
+            
+            utterance.onerror = (event) => {
+                // 'interrupted' và 'canceled' là bình thường
+                if (event.error === 'interrupted' || event.error === 'canceled') {
+                    if (!isResolved) {
+                        isResolved = true;
+                        resolve();
+                    }
+                    return;
+                }
+                
+                if (!isResolved) {
+                    isResolved = true;
+                    reject(event);
+                }
+            };
+            
             window.speechSynthesis.speak(utterance);
         });
     } catch (error) {
