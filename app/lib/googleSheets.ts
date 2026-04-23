@@ -107,7 +107,6 @@ export async function getCardsByLanguage(language: Language): Promise<Vocabulary
     if (!langConfig) return [];
 
     const targetSheetName = langConfig.sheetName;
-    
 
     const spreadsheetId = process.env.SPREADSHEET_ID;
     if (!spreadsheetId) {
@@ -116,20 +115,20 @@ export async function getCardsByLanguage(language: Language): Promise<Vocabulary
     }
 
     const sheets = await getSheets();
-    
+
     try {
         // Lấy danh sách sheets để tìm đúng tên (không phân biệt hoa/thường)
         const spreadsheet = await sheets.spreadsheets.get({
             spreadsheetId,
             includeGridData: false,
         });
-        
+
         const actualSheet = spreadsheet.data.sheets?.find(
             (sheet: any) => sheet.properties?.title?.toLowerCase() === targetSheetName.toLowerCase()
         );
-        
+
         const actualSheetName = actualSheet?.properties?.title || targetSheetName;
-        
+
         // Lấy dữ liệu từ sheet
         const response = await sheets.spreadsheets.values.get({
             spreadsheetId,
@@ -137,23 +136,25 @@ export async function getCardsByLanguage(language: Language): Promise<Vocabulary
         });
 
         let values = response.data.values || [];
-        
+
         if (values.length === 0) {
             return [];
         }
-        
+
         // Kiểm tra nếu dòng đầu tiên là header
         const firstRow = values[0];
-        const isHeader = firstRow[0] === "ID" || firstRow[0] === "id";
-        
+        const isHeader = firstRow && (firstRow[0] === "ID" || firstRow[0] === "id");
+
+        let dataRows = values;
         if (isHeader) {
-            values = values.slice(1); // Bỏ qua header
+            dataRows = values.slice(1); // Bỏ qua header
         }
-        
+
         // Chuyển đổi dữ liệu
         const cards: VocabularyCard[] = [];
-        
-        for (const row of values) {
+
+        for (let i = 0; i < dataRows.length; i++) {
+            const row = dataRows[i];
             if (row && row.length >= 3 && row[0] && row[0].trim() !== "") {
                 const card: VocabularyCard = {
                     id: row[0] || Date.now().toString(),
@@ -166,7 +167,7 @@ export async function getCardsByLanguage(language: Language): Promise<Vocabulary
                 cards.push(card);
             }
         }
-        
+
         return cards;
     } catch (error) {
         console.error(`Error loading ${targetSheetName}:`, error);
@@ -257,7 +258,10 @@ export async function updateCard(card: VocabularyCard): Promise<VocabularyCard> 
     return updatedCard;
 }
 
-// deleteCard và deleteMultipleCards giữ nguyên
+// app/lib/googleSheets.ts - Sửa lại deleteCard
+
+// app/lib/googleSheets.ts - Sửa lại deleteCard
+
 export async function deleteCard(id: string, language: Language): Promise<void> {
     const spreadsheetId = process.env.SPREADSHEET_ID;
     if (!spreadsheetId) {
@@ -269,35 +273,81 @@ export async function deleteCard(id: string, language: Language): Promise<void> 
         throw new Error(`Invalid language: ${language}`);
     }
 
-    const sheetName = langConfig.sheetName;
+    const targetSheetName = langConfig.sheetName;
     const sheets = await getSheets();
 
-    const cards = await getCardsByLanguage(language);
-    const rowIndex = cards.findIndex((c) => c.id === id);
-
-    if (rowIndex === -1) {
-        throw new Error("Card not found");
-    }
-
+    // Lấy danh sách sheets để tìm đúng tên (không phân biệt hoa/thường)
     const spreadsheet = await sheets.spreadsheets.get({
         spreadsheetId,
         includeGridData: false,
     });
 
-    const targetSheet = spreadsheet.data.sheets?.find(
-        (sheet: any) => sheet.properties?.title === sheetName
+    // Tìm sheet với tên không phân biệt hoa/thường
+    const actualSheet = spreadsheet.data.sheets?.find(
+        (sheet: any) => sheet.properties?.title?.toLowerCase() === targetSheetName.toLowerCase()
     );
 
-    if (!targetSheet || !targetSheet.properties) {
-        throw new Error(`Sheet ${sheetName} not found`);
+    if (!actualSheet || !actualSheet.properties) {
+        throw new Error(`Sheet ${targetSheetName} not found`);
     }
 
-    const sheetId = targetSheet.properties.sheetId;
+    const actualSheetName = actualSheet.properties.title;
+    const sheetId = actualSheet.properties.sheetId;
+
     if (!sheetId) {
-        throw new Error(`Sheet ${sheetName} has no sheetId`);
+        throw new Error(`Sheet ${actualSheetName} has no sheetId`);
     }
 
+    // Lấy dữ liệu trực tiếp từ sheet
+    const response = await sheets.spreadsheets.values.get({
+        spreadsheetId,
+        range: `${actualSheetName}!A:E`,
+    });
 
+    const values = response.data.values || [];
+    if (values.length === 0) {
+        throw new Error("No data found in sheet");
+    }
+
+    console.log(`Searching for card with ID: "${id}" in sheet: ${actualSheetName}`);
+    console.log(`Total rows in sheet: ${values.length}`);
+
+    // Kiểm tra xem có header không
+    const firstRow = values[0];
+    const hasHeader = firstRow && (firstRow[0] === "ID" || firstRow[0] === "id");
+
+    let startIndex = hasHeader ? 1 : 0; // Nếu có header thì bắt đầu từ 1, không thì từ 0
+
+    // Debug: In ra tất cả ID trong sheet để so sánh
+    for (let i = 0; i < values.length; i++) {
+        const row = values[i];
+        if (row && row[0]) {
+            console.log(`Row ${i}: ID = "${row[0]}" (type: ${typeof row[0]})`);
+        }
+    }
+
+    // Tìm row index của card cần xóa
+    let rowIndex = -1;
+    for (let i = startIndex; i < values.length; i++) {
+        const row = values[i];
+        if (row && row[0]) {
+            // So sánh ID, trim khoảng trắng
+            const sheetId_ = row[0].toString().trim();
+            const searchId = id.toString().trim();
+            if (sheetId_ === searchId) {
+                rowIndex = i;
+                console.log(`Found match at row ${i}: ${sheetId_} === ${searchId}`);
+                break;
+            }
+        }
+    }
+
+    if (rowIndex === -1) {
+        console.error(`Card with id ${id} not found in sheet ${actualSheetName}`);
+        throw new Error(`Card with id ${id} not found`);
+    }
+
+    // Xóa row
     await sheets.spreadsheets.batchUpdate({
         spreadsheetId,
         requestBody: {
@@ -306,13 +356,15 @@ export async function deleteCard(id: string, language: Language): Promise<void> 
                     range: {
                         sheetId: sheetId,
                         dimension: "ROWS",
-                        startIndex: rowIndex + 1,
-                        endIndex: rowIndex + 2,
+                        startIndex: rowIndex,
+                        endIndex: rowIndex + 1,
                     }
                 }
             }]
         }
     });
+
+    console.log(`Successfully deleted card with id ${id} from row ${rowIndex}`);
 
     clearSheetCache(language);
 }
@@ -330,40 +382,74 @@ export async function deleteMultipleCards(ids: string[], language: Language): Pr
         throw new Error(`Invalid language: ${language}`);
     }
 
-    const sheetName = langConfig.sheetName;
+    const targetSheetName = langConfig.sheetName;
     const sheets = await getSheets();
 
-    const allCards = await getCardsByLanguage(language);
-
+    // Lấy danh sách sheets để tìm đúng tên (không phân biệt hoa/thường)
     const spreadsheet = await sheets.spreadsheets.get({
         spreadsheetId,
         includeGridData: false,
     });
 
-    const targetSheet = spreadsheet.data.sheets?.find(
-        (sheet: any) => sheet.properties?.title === sheetName
+    // Tìm sheet với tên không phân biệt hoa/thường
+    const actualSheet = spreadsheet.data.sheets?.find(
+        (sheet: any) => sheet.properties?.title?.toLowerCase() === targetSheetName.toLowerCase()
     );
 
-    if (!targetSheet || !targetSheet.properties) {
-        throw new Error(`Sheet ${sheetName} not found`);
+    if (!actualSheet || !actualSheet.properties) {
+        throw new Error(`Sheet ${targetSheetName} not found`);
     }
 
-    const sheetId = targetSheet.properties.sheetId;
+    const actualSheetName = actualSheet.properties.title;
+    const sheetId = actualSheet.properties.sheetId;
+
     if (!sheetId) {
-        throw new Error(`Sheet ${sheetName} has no sheetId`);
+        throw new Error(`Sheet ${actualSheetName} has no sheetId`);
     }
 
-    const rowsToDelete = ids
-        .map(id => {
-            const index = allCards.findIndex(card => card.id === id);
-            return index !== -1 ? index + 1 : -1;
-        })
-        .filter(index => index !== -1)
-        .sort((a, b) => b - a);
+    // Lấy dữ liệu trực tiếp từ sheet
+    const response = await sheets.spreadsheets.values.get({
+        spreadsheetId,
+        range: `${actualSheetName}!A:E`,
+    });
 
-    if (rowsToDelete.length === 0) return;
+    const values = response.data.values || [];
+    if (values.length === 0) {
+        return;
+    }
 
+    // Kiểm tra xem có header không
+    const firstRow = values[0];
+    const hasHeader = firstRow && (firstRow[0] === "ID" || firstRow[0] === "id");
 
+    let startIndex = hasHeader ? 1 : 0;
+
+    console.log(`Searching for multiple cards in sheet: ${actualSheetName}`);
+    console.log(`IDs to delete: ${ids.join(', ')}`);
+    console.log(`Has header: ${hasHeader}, startIndex: ${startIndex}`);
+
+    // Tìm tất cả row index cần xóa
+    const rowsToDelete: number[] = [];
+    for (let i = startIndex; i < values.length; i++) {
+        const row = values[i];
+        if (row && row[0]) {
+            const sheetId_ = row[0].toString().trim();
+            if (ids.some(searchId => searchId.toString().trim() === sheetId_)) {
+                rowsToDelete.push(i);
+                console.log(`Found match at row ${i}: ID = ${sheetId_}`);
+            }
+        }
+    }
+
+    if (rowsToDelete.length === 0) {
+        console.error(`No matching cards found for ids: ${ids.join(', ')}`);
+        return;
+    }
+
+    // Sắp xếp giảm dần để xóa từ dưới lên
+    rowsToDelete.sort((a, b) => b - a);
+
+    // Tạo requests xóa từng row
     const requests = rowsToDelete.map(startIndex => ({
         deleteDimension: {
             range: {
@@ -379,6 +465,8 @@ export async function deleteMultipleCards(ids: string[], language: Language): Pr
         spreadsheetId,
         requestBody: { requests },
     });
+
+    console.log(`Successfully deleted ${rowsToDelete.length} cards from sheet ${actualSheetName}`);
 
     clearSheetCache(language);
 }

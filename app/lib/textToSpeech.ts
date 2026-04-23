@@ -6,6 +6,8 @@ let availableVoices: SpeechSynthesisVoice[] = [];
 let currentUtterance: SpeechSynthesisUtterance | null = null;
 let speechQueue: { text: string; language: Language; rate?: number }[] = [];
 let isSpeaking = false;
+let speed = 0.9;
+let slowSpeed = 0.5;
 
 function loadVoices(): Promise<SpeechSynthesisVoice[]> {
     return new Promise((resolve) => {
@@ -78,7 +80,7 @@ async function processQueue(): Promise<void> {
     }
 }
 
-function speakText(text: string, language: Language, rate: number = 0.9): Promise<void> {
+function speakText(text: string, language: Language, rate: number = speed): Promise<void> {
     return new Promise((resolve, reject) => {
         if (!('speechSynthesis' in window)) {
             reject(new Error("Speech synthesis not supported"));
@@ -156,7 +158,7 @@ function speakText(text: string, language: Language, rate: number = 0.9): Promis
     });
 }
 
-export async function playAudio(text: string, language: Language = 'english', rate: number = 0.9): Promise<void> {
+export async function playAudio(text: string, language: Language = 'english', rate: number = speed): Promise<void> {
     if (!text || text.trim() === "") {
         console.warn("Text is empty, cannot play audio");
         return;
@@ -188,7 +190,7 @@ export async function playAudio(text: string, language: Language = 'english', ra
 }
 
 export async function playAudioSlow(text: string, language: Language = 'english'): Promise<void> {
-    return playAudio(text, language, 0.5);
+    return playAudio(text, language, slowSpeed);
 }
 
 export function stopAudio(): void {
