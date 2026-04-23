@@ -258,9 +258,7 @@ export async function updateCard(card: VocabularyCard): Promise<VocabularyCard> 
     return updatedCard;
 }
 
-// app/lib/googleSheets.ts - Sửa lại deleteCard
-
-// app/lib/googleSheets.ts - Sửa lại deleteCard
+// app/lib/googleSheets.ts - Sửa lại phần kiểm tra sheetId
 
 export async function deleteCard(id: string, language: Language): Promise<void> {
     const spreadsheetId = process.env.SPREADSHEET_ID;
@@ -276,25 +274,36 @@ export async function deleteCard(id: string, language: Language): Promise<void> 
     const targetSheetName = langConfig.sheetName;
     const sheets = await getSheets();
 
-    // Lấy danh sách sheets để tìm đúng tên (không phân biệt hoa/thường)
+    console.log(`Looking for sheet: ${targetSheetName}`);
+
+    // Lấy danh sách sheets để tìm đúng tên
     const spreadsheet = await sheets.spreadsheets.get({
         spreadsheetId,
         includeGridData: false,
     });
 
-    // Tìm sheet với tên không phân biệt hoa/thường
+    // Log tất cả sheets hiện có
+    console.log("Available sheets:");
+    spreadsheet.data.sheets?.forEach((sheet: any) => {
+        console.log(`  - ${sheet.properties?.title} (ID: ${sheet.properties?.sheetId})`);
+    });
+
+    // Tìm sheet với tên chính xác (không phân biệt hoa/thường)
     const actualSheet = spreadsheet.data.sheets?.find(
         (sheet: any) => sheet.properties?.title?.toLowerCase() === targetSheetName.toLowerCase()
     );
 
     if (!actualSheet || !actualSheet.properties) {
-        throw new Error(`Sheet ${targetSheetName} not found`);
+        throw new Error(`Sheet ${targetSheetName} not found. Available sheets: ${spreadsheet.data.sheets?.map((s: any) => s.properties?.title).join(', ')}`);
     }
 
     const actualSheetName = actualSheet.properties.title;
     const sheetId = actualSheet.properties.sheetId;
 
-    if (!sheetId) {
+    console.log(`Found sheet: ${actualSheetName} with ID: ${sheetId}`);
+
+    // SỬA: Kiểm tra sheetId !== null && sheetId !== undefined (vì 0 là hợp lệ)
+    if (sheetId === null || sheetId === undefined) {
         throw new Error(`Sheet ${actualSheetName} has no sheetId`);
     }
 
@@ -316,22 +325,14 @@ export async function deleteCard(id: string, language: Language): Promise<void> 
     const firstRow = values[0];
     const hasHeader = firstRow && (firstRow[0] === "ID" || firstRow[0] === "id");
 
-    let startIndex = hasHeader ? 1 : 0; // Nếu có header thì bắt đầu từ 1, không thì từ 0
-
-    // Debug: In ra tất cả ID trong sheet để so sánh
-    for (let i = 0; i < values.length; i++) {
-        const row = values[i];
-        if (row && row[0]) {
-            console.log(`Row ${i}: ID = "${row[0]}" (type: ${typeof row[0]})`);
-        }
-    }
+    let startIndex = hasHeader ? 1 : 0;
+    console.log(`Has header: ${hasHeader}, startIndex: ${startIndex}`);
 
     // Tìm row index của card cần xóa
     let rowIndex = -1;
     for (let i = startIndex; i < values.length; i++) {
         const row = values[i];
         if (row && row[0]) {
-            // So sánh ID, trim khoảng trắng
             const sheetId_ = row[0].toString().trim();
             const searchId = id.toString().trim();
             if (sheetId_ === searchId) {
@@ -369,6 +370,7 @@ export async function deleteCard(id: string, language: Language): Promise<void> 
     clearSheetCache(language);
 }
 
+// Sửa tương tự trong deleteMultipleCards
 export async function deleteMultipleCards(ids: string[], language: Language): Promise<void> {
     if (ids.length === 0) return;
 
@@ -385,7 +387,7 @@ export async function deleteMultipleCards(ids: string[], language: Language): Pr
     const targetSheetName = langConfig.sheetName;
     const sheets = await getSheets();
 
-    // Lấy danh sách sheets để tìm đúng tên (không phân biệt hoa/thường)
+    // Lấy danh sách sheets để tìm đúng tên
     const spreadsheet = await sheets.spreadsheets.get({
         spreadsheetId,
         includeGridData: false,
@@ -403,7 +405,8 @@ export async function deleteMultipleCards(ids: string[], language: Language): Pr
     const actualSheetName = actualSheet.properties.title;
     const sheetId = actualSheet.properties.sheetId;
 
-    if (!sheetId) {
+    // SỬA: Kiểm tra sheetId !== null && sheetId !== undefined (vì 0 là hợp lệ)
+    if (sheetId === null || sheetId === undefined) {
         throw new Error(`Sheet ${actualSheetName} has no sheetId`);
     }
 
@@ -426,7 +429,6 @@ export async function deleteMultipleCards(ids: string[], language: Language): Pr
 
     console.log(`Searching for multiple cards in sheet: ${actualSheetName}`);
     console.log(`IDs to delete: ${ids.join(', ')}`);
-    console.log(`Has header: ${hasHeader}, startIndex: ${startIndex}`);
 
     // Tìm tất cả row index cần xóa
     const rowsToDelete: number[] = [];
