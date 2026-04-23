@@ -6,8 +6,8 @@ import "./globals.css";
 const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
-  title: "Học Từ Vựng Tiếng Anh - Flashcard",
-  description: "Học từ vựng tiếng Anh với flashcard, có âm thanh và quản lý từ vựng",
+  title: "Học Ngoại Ngữ - Flashcard Đa Ngôn Ngữ",
+  description: "Học từ vựng tiếng Anh, Hàn Quốc, Nhật Bản, Trung Quốc và nhiều ngôn ngữ khác với flashcard, có âm thanh và quản lý từ vựng",
 };
 
 export default function RootLayout({

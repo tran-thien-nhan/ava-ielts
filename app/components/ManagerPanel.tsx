@@ -2,7 +2,7 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { VocabularyCard } from "../types";
+import { VocabularyCard, Language, LANGUAGES } from "../types";
 import { playAudio } from "../lib/textToSpeech";
 
 interface ManagerPanelProps {
@@ -12,9 +12,10 @@ interface ManagerPanelProps {
     onDelete: (id: string) => void;
     onBulkDelete: (ids: string[]) => Promise<void>;
     onShuffle: () => void;
+    currentLanguage: Language;
 }
 
-type SortField = "vietnamese" | "english" | "createdAt";
+type SortField = "word" | "meaning" | "createdAt";
 type SortOrder = "asc" | "desc";
 
 export default function ManagerPanel({ 
@@ -23,31 +24,45 @@ export default function ManagerPanel({
     onEdit, 
     onDelete, 
     onBulkDelete,
-    onShuffle 
+    onShuffle,
+    currentLanguage
 }: ManagerPanelProps) {
     const [searchTerm, setSearchTerm] = useState("");
     const [sortField, setSortField] = useState<SortField>("createdAt");
     const [sortOrder, setSortOrder] = useState<SortOrder>("desc");
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
     const [isDeleting, setIsDeleting] = useState(false);
+    
+    // Bỏ filterLanguage - chỉ hiển thị cards của ngôn ngữ hiện tại
+    // const [filterLanguage, setFilterLanguage] = useState<Language | 'all'>('all');
 
-    // Lọc + Sắp xếp
+    const currentLangInfo = LANGUAGES.find(l => l.code === currentLanguage);
+
+    // Chỉ lọc và sắp xếp cards của ngôn ngữ hiện tại
     const filteredAndSortedCards = useMemo(() => {
-        let result = cards.filter(card =>
-            card.vietnamese.toLowerCase().includes(searchTerm.toLowerCase()) ||
-            card.english.toLowerCase().includes(searchTerm.toLowerCase())
-        );
+        // Chỉ lấy cards của ngôn ngữ hiện tại
+        let result = cards.filter(card => {
+            if (!card || !card.word || !card.meaning) {
+                return false;
+            }
+            // Chỉ hiển thị cards đúng ngôn ngữ hiện tại
+            if (card.language !== currentLanguage) {
+                return false;
+            }
+            return card.word.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                   card.meaning.toLowerCase().includes(searchTerm.toLowerCase());
+        });
 
         result.sort((a, b) => {
-            let valA: string | number = a[sortField];
-            let valB: string | number = b[sortField];
+            let valA: string | number = a[sortField as keyof VocabularyCard] as string | number;
+            let valB: string | number = b[sortField as keyof VocabularyCard] as string | number;
 
             if (sortField === "createdAt") {
                 valA = new Date(valA as string).getTime();
                 valB = new Date(valB as string).getTime();
             } else {
-                valA = (valA as string).toLowerCase();
-                valB = (valB as string).toLowerCase();
+                valA = String(valA || '').toLowerCase();
+                valB = String(valB || '').toLowerCase();
             }
 
             if (valA < valB) return sortOrder === "asc" ? -1 : 1;
@@ -56,7 +71,7 @@ export default function ManagerPanel({
         });
 
         return result;
-    }, [cards, searchTerm, sortField, sortOrder]);
+    }, [cards, searchTerm, sortField, sortOrder, currentLanguage]);
 
     const toggleSelect = (id: string) => {
         const newSet = new Set(selectedIds);
@@ -84,7 +99,6 @@ export default function ManagerPanel({
             const idsArray = Array.from(selectedIds);
             await onBulkDelete(idsArray);
             setSelectedIds(new Set());
-            // Hiển thị thông báo thành công (có thể thêm toast)
             alert(`✅ Đã xóa thành công ${count} thẻ!`);
         } catch (error) {
             console.error("Bulk delete failed:", error);
@@ -94,23 +108,29 @@ export default function ManagerPanel({
         }
     };
 
-    const handlePlayAudio = (english: string) => {
-        playAudio(english);
+    const handlePlayAudio = (text: string, lang: Language) => {
+        if (text) {
+            playAudio(text, lang);
+        }
     };
 
     const copyToClipboard = (text: string) => {
-        navigator.clipboard.writeText(text);
-        alert(`📋 Đã copy: "${text}"`);
+        if (text) {
+            navigator.clipboard.writeText(text);
+            alert(`📋 Đã copy: "${text}"`);
+        }
     };
 
     return (
         <div className="bg-zinc-900 border border-zinc-800 rounded-3xl p-6 md:p-8">
-            {/* Header + Stats */}
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-8">
                 <div>
-                    <h2 className="text-2xl font-bold text-white">Quản lý từ vựng</h2>
+                    <h2 className="text-2xl font-bold text-white flex items-center gap-2">
+                        <span>{currentLangInfo?.flag}</span>
+                        <span>Quản lý từ vựng {currentLangInfo?.name}</span>
+                    </h2>
                     <p className="text-zinc-400 text-sm mt-1">
-                        Tổng cộng: <span className="text-emerald-400 font-medium">{cards.length}</span> thẻ
+                        Tổng cộng: <span className="text-emerald-400 font-medium">{filteredAndSortedCards.length}</span> thẻ
                     </p>
                 </div>
 
@@ -123,14 +143,13 @@ export default function ManagerPanel({
                     </button>
                     <button
                         onClick={onAdd}
-                        className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-2xl transition-all flex items-center gap-2 font-medium"
+                        className={`px-5 py-2.5 bg-gradient-to-r ${currentLangInfo?.color} hover:opacity-90 text-white rounded-2xl transition-all flex items-center gap-2 font-medium`}
                     >
                         + Thêm thẻ mới
                     </button>
                 </div>
             </div>
 
-            {/* Search & Sort */}
             <div className="flex flex-col md:flex-row gap-4 mb-6">
                 <input
                     type="text"
@@ -151,12 +170,13 @@ export default function ManagerPanel({
                 >
                     <option value="createdAt-desc">Mới nhất</option>
                     <option value="createdAt-asc">Cũ nhất</option>
-                    <option value="vietnamese-asc">Tiếng Việt (A-Z)</option>
-                    <option value="english-asc">Tiếng Anh (A-Z)</option>
+                    <option value="word-asc">Từ vựng (A-Z)</option>
+                    <option value="word-desc">Từ vựng (Z-A)</option>
+                    <option value="meaning-asc">Nghĩa (A-Z)</option>
+                    <option value="meaning-desc">Nghĩa (Z-A)</option>
                 </select>
             </div>
 
-            {/* Bulk Action Bar */}
             {selectedIds.size > 0 && (
                 <div className="mb-4 p-4 bg-red-950/50 border border-red-800/50 rounded-2xl flex items-center justify-between backdrop-blur-sm">
                     <div className="flex items-center gap-3">
@@ -196,7 +216,6 @@ export default function ManagerPanel({
                 </div>
             )}
 
-            {/* Table */}
             <div className="overflow-x-auto rounded-2xl border border-zinc-800">
                 <table className="w-full text-sm text-zinc-200">
                     <thead className="bg-zinc-950 border-b border-zinc-800">
@@ -210,60 +229,62 @@ export default function ManagerPanel({
                                     disabled={filteredAndSortedCards.length === 0}
                                 />
                             </th>
-                            <th className="text-left py-4 px-6 font-medium text-zinc-400">Tiếng Việt</th>
-                            <th className="text-left py-4 px-6 font-medium text-zinc-400">Tiếng Anh</th>
+                            <th className="text-left py-4 px-6 font-medium text-zinc-400">Từ vựng</th>
+                            <th className="text-left py-4 px-6 font-medium text-zinc-400">Nghĩa</th>
                             <th className="text-center py-4 px-6 font-medium text-zinc-400 w-20">Nghe</th>
                             <th className="text-center py-4 px-6 font-medium text-zinc-400 w-40">Thao tác</th>
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-zinc-800">
-                        {filteredAndSortedCards.map((card) => (
-                            <tr key={card.id} className="hover:bg-zinc-800/50 transition-colors">
-                                <td className="py-4 px-4">
-                                    <input 
-                                        type="checkbox"
-                                        checked={selectedIds.has(card.id)}
-                                        onChange={() => toggleSelect(card.id)}
-                                        className="w-4 h-4 accent-emerald-500 cursor-pointer"
-                                    />
-                                </td>
-                                <td className="py-4 px-6 font-medium">{card.vietnamese}</td>
-                                <td className="py-4 px-6 text-emerald-300">
-                                    <span 
-                                        onClick={() => copyToClipboard(card.english)}
-                                        className="cursor-pointer hover:text-emerald-400 transition-colors"
-                                        title="Click để copy"
-                                    >
-                                        {card.english}
-                                    </span>
-                                </td>
-                                <td className="py-4 px-6 text-center">
-                                    <button
-                                        onClick={() => handlePlayAudio(card.english)}
-                                        className="inline-flex items-center justify-center w-9 h-9 bg-zinc-800 hover:bg-emerald-600 hover:text-white text-emerald-400 rounded-xl transition-all"
-                                        title="Nghe phát âm"
-                                    >
-                                        🔊
-                                    </button>
-                                </td>
-                                <td className="py-4 px-6 text-center">
-                                    <button
-                                        onClick={() => onEdit(card)}
-                                        className="inline-flex items-center justify-center w-9 h-9 bg-zinc-800 hover:bg-yellow-600 hover:text-white text-yellow-400 rounded-xl transition-all mr-2"
-                                        title="Sửa"
-                                    >
-                                        ✏️
-                                    </button>
-                                    <button
-                                        onClick={() => onDelete(card.id)}
-                                        className="inline-flex items-center justify-center w-9 h-9 bg-zinc-800 hover:bg-red-600 hover:text-white text-red-400 rounded-xl transition-all"
-                                        title="Xóa"
-                                    >
-                                        🗑️
-                                    </button>
-                                </td>
-                            </tr>
-                        ))}
+                        {filteredAndSortedCards.map((card) => {
+                            return (
+                                <tr key={card.id} className="hover:bg-zinc-800/50 transition-colors">
+                                    <td className="py-4 px-4">
+                                        <input 
+                                            type="checkbox"
+                                            checked={selectedIds.has(card.id)}
+                                            onChange={() => toggleSelect(card.id)}
+                                            className="w-4 h-4 accent-emerald-500 cursor-pointer"
+                                        />
+                                    </td>
+                                    <td className="py-4 px-6 font-medium">{card.word || '???'}</td>
+                                    <td className="py-4 px-6 text-emerald-300">
+                                        <span 
+                                            onClick={() => copyToClipboard(card.meaning || '')}
+                                            className="cursor-pointer hover:text-emerald-400 transition-colors"
+                                            title="Click để copy"
+                                        >
+                                            {card.meaning || '???'}
+                                        </span>
+                                    </td>
+                                    <td className="py-4 px-6 text-center">
+                                        <button
+                                            onClick={() => handlePlayAudio(card.word, card.language)}
+                                            className="inline-flex items-center justify-center w-9 h-9 bg-zinc-800 hover:bg-emerald-600 hover:text-white text-emerald-400 rounded-xl transition-all"
+                                            title="Nghe phát âm"
+                                        >
+                                            🔊
+                                        </button>
+                                    </td>
+                                    <td className="py-4 px-6 text-center">
+                                        <button
+                                            onClick={() => onEdit(card)}
+                                            className="inline-flex items-center justify-center w-9 h-9 bg-zinc-800 hover:bg-yellow-600 hover:text-white text-yellow-400 rounded-xl transition-all mr-2"
+                                            title="Sửa"
+                                        >
+                                            ✏️
+                                        </button>
+                                        <button
+                                            onClick={() => onDelete(card.id)}
+                                            className="inline-flex items-center justify-center w-9 h-9 bg-zinc-800 hover:bg-red-600 hover:text-white text-red-400 rounded-xl transition-all"
+                                            title="Xóa"
+                                        >
+                                            🗑️
+                                        </button>
+                                    </td>
+                                </tr>
+                            );
+                        })}
                     </tbody>
                 </table>
             </div>
@@ -274,7 +295,6 @@ export default function ManagerPanel({
                 </div>
             )}
 
-            {/* Hiển thị số lượng đã chọn ở footer */}
             {selectedIds.size > 0 && !isDeleting && (
                 <div className="mt-4 text-center text-zinc-500 text-sm">
                     Đã chọn {selectedIds.size} / {filteredAndSortedCards.length} thẻ

@@ -2,8 +2,8 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { VocabularyCard } from "../types";
-import { playAudio, stopAudio } from "../lib/textToSpeech";
+import { VocabularyCard, Language, LANGUAGES } from "../types";
+import { playAudio, stopAudio, playAudioSlow } from "../lib/textToSpeech";
 
 interface FlashcardProps {
     card: VocabularyCard;
@@ -15,6 +15,7 @@ interface FlashcardProps {
     hasPrev: boolean;
     totalCards: number;
     currentIndex: number;
+    language: Language;
 }
 
 type FontSize = 'extra_small' | 'small' | 'medium' | 'large' | 'xlarge';
@@ -28,22 +29,25 @@ export default function Flashcard({
     hasNext,
     hasPrev,
     totalCards,
-    currentIndex
+    currentIndex,
+    language
 }: FlashcardProps) {
     const [isFlipped, setIsFlipped] = useState(false);
     const [isPlaying, setIsPlaying] = useState(false);
+    const [isPlayingSlow, setIsPlayingSlow] = useState(false);
     const [isShuffling, setIsShuffling] = useState(false);
     const [isReversed, setIsReversed] = useState(false);
     const [isDictationMode, setIsDictationMode] = useState(false);
     const [hasPlayedDictation, setHasPlayedDictation] = useState(false);
     const [isModalOpen, setIsModalOpen] = useState(false);
-    const [fontSize, setFontSize] = useState<FontSize>('extra_small');
+    const [fontSize, setFontSize] = useState<FontSize>('medium');
     const audioTimeoutRef = useRef<NodeJS.Timeout | null>(null);
     const isMountedRef = useRef(true);
     const lastFlippedStateRef = useRef(false);
     const currentPlayPromiseRef = useRef<Promise<void> | null>(null);
 
-    // Font size classes
+    const langConfig = LANGUAGES.find(l => l.code === language) || LANGUAGES[0];
+
     const fontSizeClasses = {
         extra_small: 'text-base sm:text-lg md:text-xl',
         small: 'text-xl sm:text-2xl md:text-3xl',
@@ -60,7 +64,6 @@ export default function Flashcard({
         xlarge: 'text-3xl sm:text-5xl md:text-6xl'
     };
 
-    // Helper function để lấy class name an toàn
     const getFontSizeClass = (size: FontSize) => {
         return fontSizeClasses[size] || fontSizeClasses.medium;
     };
@@ -69,25 +72,17 @@ export default function Flashcard({
         return dictationFontSizeClasses[size] || dictationFontSizeClasses.medium;
     };
 
-    // Hàm dừng audio
     const handleStopAudio = useCallback(() => {
-        // Clear timeout nếu có
         if (audioTimeoutRef.current) {
             clearTimeout(audioTimeoutRef.current);
             audioTimeoutRef.current = null;
         }
-        
-        // Dừng audio từ textToSpeech
         stopAudio();
-        
-        // Reset state
         setIsPlaying(false);
-        
-        // Clear promise reference
+        setIsPlayingSlow(false);
         currentPlayPromiseRef.current = null;
     }, []);
 
-    // Cleanup khi unmount
     useEffect(() => {
         isMountedRef.current = true;
         return () => {
@@ -99,15 +94,14 @@ export default function Flashcard({
         };
     }, []);
 
-    // Reset khi đổi thẻ
     useEffect(() => {
         if (card && card.id) {
             setIsFlipped(false);
             setIsPlaying(false);
+            setIsPlayingSlow(false);
             setHasPlayedDictation(false);
             lastFlippedStateRef.current = false;
-            
-            // Dừng audio khi đổi thẻ
+
             if (audioTimeoutRef.current) {
                 clearTimeout(audioTimeoutRef.current);
                 audioTimeoutRef.current = null;
@@ -117,41 +111,32 @@ export default function Flashcard({
         }
     }, [card?.id]);
 
-    // Tự động phát âm trong dictation mode khi hiển thị mặt trước (phát tiếng Anh)
     useEffect(() => {
-        if (isDictationMode && !isFlipped && card && card.english && !hasPlayedDictation && !isPlaying && !isReversed) {
+        if (isDictationMode && !isFlipped && card && card.word && !hasPlayedDictation && !isPlaying && !isPlayingSlow && !isReversed) {
             const timer = setTimeout(() => {
-                if (isDictationMode && !isFlipped && card?.english && !isPlaying && isMountedRef.current && !isReversed) {
+                if (isDictationMode && !isFlipped && card?.word && !isPlaying && !isPlayingSlow && isMountedRef.current && !isReversed) {
                     handlePlayDictationAudio();
                 }
             }, 300);
             return () => clearTimeout(timer);
         }
-    }, [isDictationMode, isFlipped, card, hasPlayedDictation, isPlaying, isReversed]);
+    }, [isDictationMode, isFlipped, card, hasPlayedDictation, isPlaying, isPlayingSlow, isReversed]);
 
     const handlePlayAudio = useCallback(async () => {
-        if (!card || !card.english || isPlaying) return;
+        if (!card || !card.word || isPlaying) return;
 
-        // Dừng audio hiện tại trước
         handleStopAudio();
-        
-        // Đợi một chút để chắc chắn audio đã dừng
         await new Promise(resolve => setTimeout(resolve, 100));
-        
-        // Set playing state
+
         setIsPlaying(true);
 
         try {
-            // Lưu promise để có thể cancel sau
-            currentPlayPromiseRef.current = playAudio(card.english);
+            currentPlayPromiseRef.current = playAudio(card.word, language);
             await currentPlayPromiseRef.current;
         } catch (error) {
             console.error("Error playing audio:", error);
         } finally {
-            // Chỉ set isPlaying = false nếu vẫn đang trong trạng thái playing
-            // và không bị stop bởi nút Stop
             if (isMountedRef.current && currentPlayPromiseRef.current) {
-                // Đặt timeout để đảm bảo audio đã kết thúc
                 if (audioTimeoutRef.current) {
                     clearTimeout(audioTimeoutRef.current);
                 }
@@ -163,23 +148,47 @@ export default function Flashcard({
                 }, 500);
             }
         }
-    }, [card, isPlaying, handleStopAudio]);
+    }, [card, isPlaying, handleStopAudio, language]);
+
+    const handlePlayAudioSlow = useCallback(async () => {
+        if (!card || !card.word || isPlayingSlow) return;
+
+        handleStopAudio();
+        await new Promise(resolve => setTimeout(resolve, 100));
+
+        setIsPlayingSlow(true);
+
+        try {
+            currentPlayPromiseRef.current = playAudioSlow(card.word, language);
+            await currentPlayPromiseRef.current;
+        } catch (error) {
+            console.error("Error playing slow audio:", error);
+        } finally {
+            if (isMountedRef.current && currentPlayPromiseRef.current) {
+                if (audioTimeoutRef.current) {
+                    clearTimeout(audioTimeoutRef.current);
+                }
+                audioTimeoutRef.current = setTimeout(() => {
+                    if (isMountedRef.current) {
+                        setIsPlayingSlow(false);
+                        currentPlayPromiseRef.current = null;
+                    }
+                }, 500);
+            }
+        }
+    }, [card, isPlayingSlow, handleStopAudio, language]);
 
     const handlePlayDictationAudio = useCallback(async () => {
-        // Trong chế độ chép chính tả, phát âm thanh tiếng Anh
-        if (!card || !card.english || isPlaying) return;
+        if (!card || !card.word || isPlaying) return;
 
-        // Dừng audio hiện tại trước
         handleStopAudio();
-        
-        // Đợi một chút để chắc chắn audio đã dừng
         await new Promise(resolve => setTimeout(resolve, 100));
-        
+
         setIsPlaying(true);
         setHasPlayedDictation(true);
 
         try {
-            currentPlayPromiseRef.current = playAudio(card.english);
+            currentPlayPromiseRef.current = playAudio(card.word, language);
             await currentPlayPromiseRef.current;
         } catch (error) {
             console.error("Error playing audio:", error);
@@ -196,7 +205,36 @@ export default function Flashcard({
                 }, 500);
             }
         }
-    }, [card, isPlaying, handleStopAudio]);
+    }, [card, isPlaying, handleStopAudio, language]);
+
+    const handlePlayDictationAudioSlow = useCallback(async () => {
+        if (!card || !card.word || isPlayingSlow) return;
+
+        handleStopAudio();
+        await new Promise(resolve => setTimeout(resolve, 100));
+
+        setIsPlayingSlow(true);
+        setHasPlayedDictation(true);
+
+        try {
+            currentPlayPromiseRef.current = playAudioSlow(card.word, language);
+            await currentPlayPromiseRef.current;
+        } catch (error) {
+            console.error("Error playing slow audio:", error);
+        } finally {
+            if (isMountedRef.current && currentPlayPromiseRef.current) {
+                if (audioTimeoutRef.current) {
+                    clearTimeout(audioTimeoutRef.current);
+                }
+                audioTimeoutRef.current = setTimeout(() => {
+                    if (isMountedRef.current) {
+                        setIsPlayingSlow(false);
+                        currentPlayPromiseRef.current = null;
+                    }
+                }, 500);
+            }
+        }
+    }, [card, isPlayingSlow, handleStopAudio, language]);
 
     const handleFlip = useCallback(() => {
         setIsFlipped(prev => !prev);
@@ -205,35 +243,38 @@ export default function Flashcard({
         }
     }, [isDictationMode]);
 
-    // Tự động phát âm khi lật sang mặt sau - CHỈ KHI KHÔNG Ở CHẾ ĐỘ ĐẢO NGƯỢC VÀ KHÔNG Ở CHẾ ĐỘ CHÉP CHÍNH TẢ
     useEffect(() => {
-        // Không tự động phát nếu đang ở chế độ đảo ngược hoặc chế độ chép chính tả
         if (isReversed || isDictationMode) {
             lastFlippedStateRef.current = isFlipped;
             return;
         }
 
-        // Kiểm tra: đang ở mặt sau, có nội dung, và vừa chuyển từ mặt trước sang mặt sau
-        if (isFlipped && card && card.english && !isPlaying && !lastFlippedStateRef.current) {
+        if (isFlipped && card && card.word && !isPlaying && !isPlayingSlow && !lastFlippedStateRef.current) {
             const timer = setTimeout(() => {
-                if (isFlipped && card?.english && !isPlaying && isMountedRef.current && !isReversed && !isDictationMode) {
+                if (isFlipped && card?.word && !isPlaying && !isPlayingSlow && isMountedRef.current && !isReversed && !isDictationMode) {
                     handlePlayAudio();
                 }
             }, 150);
             return () => clearTimeout(timer);
         }
-        // Cập nhật trạng thái lật trước đó
         lastFlippedStateRef.current = isFlipped;
-    }, [isFlipped, card, isPlaying, handlePlayAudio, isReversed, isDictationMode]);
+    }, [isFlipped, card, isPlaying, isPlayingSlow, handlePlayAudio, isReversed, isDictationMode]);
 
-    const handleManualPlayAudio = useCallback(() => {
-        // Trong chế độ chép chính tả và đang ở mặt trước, phát tiếng Anh
+    const handleManualPlayAudio = useCallback((isSlow: boolean = false) => {
         if (isDictationMode && !isFlipped) {
-            handlePlayDictationAudio();
+            if (isSlow) {
+                handlePlayDictationAudioSlow();
+            } else {
+                handlePlayDictationAudio();
+            }
         } else {
-            handlePlayAudio();
+            if (isSlow) {
+                handlePlayAudioSlow();
+            } else {
+                handlePlayAudio();
+            }
         }
-    }, [handlePlayAudio, handlePlayDictationAudio, isDictationMode, isFlipped]);
+    }, [handlePlayAudio, handlePlayAudioSlow, handlePlayDictationAudio, handlePlayDictationAudioSlow, isDictationMode, isFlipped]);
 
     const handleShuffle = useCallback(async () => {
         if (isShuffling) return;
@@ -265,7 +306,6 @@ export default function Flashcard({
     }, [handleStopAudio]);
 
     const handleReset = useCallback(() => {
-        // Reset all states
         setIsReversed(false);
         setIsDictationMode(false);
         setIsFlipped(false);
@@ -273,7 +313,6 @@ export default function Flashcard({
         setFontSize('medium');
         handleStopAudio();
 
-        // Call parent reset if provided
         if (onReset) {
             onReset();
         }
@@ -297,42 +336,43 @@ export default function Flashcard({
             onNext();
         } else if (e.key.toLowerCase() === "a") {
             e.preventDefault();
-            handleManualPlayAudio();
+            handleManualPlayAudio(false);
+        } else if (e.key.toLowerCase() === "s") {
+            e.preventDefault();
+            handleManualPlayAudio(true);
         } else if (e.key.toLowerCase() === "x") {
             e.preventDefault();
             handleStopAudio();
-        } else if (e.key.toLowerCase() === "s") {
-            e.preventDefault();
-            handleShuffle();
         } else if (e.key.toLowerCase() === "r") {
             e.preventDefault();
             handleReverseAll();
         } else if (e.key.toLowerCase() === "d") {
             e.preventDefault();
             handleDictationMode();
+        } else if (e.key.toLowerCase() === "t") {
+            e.preventDefault();
+            handleShuffle();
         } else if (e.key === "Escape" && isModalOpen) {
             e.preventDefault();
             setIsModalOpen(false);
         }
     }, [hasPrev, hasNext, onPrev, onNext, handleFlip, handleManualPlayAudio, handleStopAudio, handleShuffle, handleReverseAll, handleDictationMode, isModalOpen]);
 
-    // Xác định nội dung hiển thị dựa trên chế độ
     const getFrontContent = () => {
         if (isDictationMode && !isFlipped) {
             return (
                 <div className="relative h-full flex flex-col items-center justify-center p-6 sm:p-10 text-center">
-                    <div className="flex gap-3 sm:gap-4">
+                    <div className="flex flex-wrap gap-3 sm:gap-4 justify-center">
                         <button
                             onClick={(e) => {
                                 e.stopPropagation();
-                                handlePlayDictationAudio();
+                                handleManualPlayAudio(false);
                             }}
                             disabled={isPlaying}
-                            className="px-8 sm:px-12 py-4 sm:py-6 bg-gradient-to-r from-purple-600 to-pink-600 
-                                       hover:from-purple-500 hover:to-pink-500 disabled:from-zinc-700 disabled:to-zinc-700
+                            className={`px-8 sm:px-12 py-4 sm:py-6 bg-gradient-to-r ${langConfig.color} 
+                                       hover:opacity-90 disabled:from-zinc-700 disabled:to-zinc-700
                                        text-white font-bold text-lg sm:text-2xl rounded-2xl sm:rounded-3xl 
-                                       transition-all duration-300 shadow-xl shadow-purple-500/40 
-                                       flex items-center gap-3 sm:gap-4 active:scale-95"
+                                       transition-all duration-300 shadow-xl flex items-center gap-3 sm:gap-4 active:scale-95`}
                         >
                             {isPlaying ? (
                                 <>
@@ -341,13 +381,37 @@ export default function Flashcard({
                                 </>
                             ) : (
                                 <>
-                                    <span>🎙️</span>
-                                    <span className="text-sm sm:text-lg">Nghe và chép</span>
+                                    <span>🔊</span>
+                                    <span className="text-sm sm:text-lg">Nghe</span>
                                 </>
                             )}
                         </button>
-                        
-                        {isPlaying && (
+
+                        <button
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                handleManualPlayAudio(true);
+                            }}
+                            disabled={isPlayingSlow}
+                            className={`px-8 sm:px-12 py-4 sm:py-6 bg-gradient-to-r from-blue-600 to-indigo-600 
+                                       hover:opacity-90 disabled:from-zinc-700 disabled:to-zinc-700
+                                       text-white font-bold text-lg sm:text-2xl rounded-2xl sm:rounded-3xl 
+                                       transition-all duration-300 shadow-xl flex items-center gap-3 sm:gap-4 active:scale-95`}
+                        >
+                            {isPlayingSlow ? (
+                                <>
+                                    <span className="animate-pulse">🐢</span>
+                                    <span className="text-sm sm:text-lg">Đang phát...</span>
+                                </>
+                            ) : (
+                                <>
+                                    <span>🐢</span>
+                                    <span className="text-sm sm:text-lg">Nghe chậm</span>
+                                </>
+                            )}
+                        </button>
+
+                        {(isPlaying || isPlayingSlow) && (
                             <button
                                 onClick={(e) => {
                                     e.stopPropagation();
@@ -364,19 +428,23 @@ export default function Flashcard({
                         )}
                     </div>
                     <p className="mt-6 sm:mt-8 text-zinc-400 text-xs sm:text-sm">
-                        Nghe từ tiếng Anh và viết lại
+                        Nghe từ {langConfig.name} và viết lại
                     </p>
                 </div>
             );
         }
 
         if (!isDictationMode || (isDictationMode && isFlipped)) {
-            const text = !isReversed ? (card.vietnamese || "???") : (card.english || "???");
+            const text = !isReversed ? (card?.word || "???") : (card?.meaning || "???");
+            const textLang = !isReversed ? langConfig.name : 'Tiếng Việt';
 
             return (
                 <div className="relative h-full flex flex-col items-center justify-center p-6 sm:p-10 text-center">
                     <div className={`${getFontSizeClass(fontSize)} font-bold text-white leading-tight tracking-tight break-words px-2 overflow-y-auto max-h-full w-full`}>
                         {text}
+                    </div>
+                    <div className="mt-4 text-zinc-500 text-xs">
+                        {textLang}
                     </div>
                     <div className="mt-8 sm:mt-12 text-zinc-400 text-xs sm:text-sm flex items-center gap-1 sm:gap-2 flex-wrap justify-center">
                         <span>👆 Nhấn</span>
@@ -398,29 +466,30 @@ export default function Flashcard({
                     <div className="space-y-4 sm:space-y-6 w-full overflow-y-auto max-h-full">
                         <div>
                             <div className={`${getFontSizeClass(fontSize)} font-bold text-white leading-tight tracking-tight break-words px-2`}>
-                                {card.english || "???"}
+                                {card?.word || "???"}
                             </div>
+                            <div className="mt-2 text-zinc-500 text-xs">{langConfig.name}</div>
                         </div>
 
                         <div className="border-t border-emerald-500/30 pt-4 sm:pt-6">
                             <div className={`${getDictationFontSizeClass(fontSize)} text-zinc-200 leading-relaxed break-words px-2`}>
-                                {card.vietnamese || "???"}
+                                {card?.meaning || "???"}
                             </div>
+                            <div className="mt-2 text-zinc-500 text-xs">Tiếng Việt</div>
                         </div>
                     </div>
 
-                    <div className="flex gap-3 sm:gap-4 mt-6 sm:mt-8">
+                    <div className="flex flex-wrap gap-3 sm:gap-4 mt-6 sm:mt-8 justify-center">
                         <button
                             onClick={(e) => {
                                 e.stopPropagation();
-                                handleManualPlayAudio();
+                                handleManualPlayAudio(false);
                             }}
                             disabled={isPlaying}
-                            className="px-6 sm:px-10 py-2.5 sm:py-4 bg-gradient-to-r from-emerald-600 to-teal-600 
-                                       hover:from-emerald-500 hover:to-teal-500 disabled:from-zinc-700 disabled:to-zinc-700
+                            className={`px-6 sm:px-10 py-2.5 sm:py-4 bg-gradient-to-r ${langConfig.color} 
+                                       hover:opacity-90 disabled:from-zinc-700 disabled:to-zinc-700
                                        text-white font-medium text-sm sm:text-lg rounded-xl sm:rounded-2xl 
-                                       transition-all duration-300 shadow-lg sm:shadow-xl shadow-emerald-500/40 
-                                       flex items-center gap-2 sm:gap-3 active:scale-95"
+                                       transition-all duration-300 shadow-lg flex items-center gap-2 sm:gap-3 active:scale-95`}
                         >
                             {isPlaying ? (
                                 <>
@@ -434,8 +503,32 @@ export default function Flashcard({
                                 </>
                             )}
                         </button>
-                        
-                        {isPlaying && (
+
+                        <button
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                handleManualPlayAudio(true);
+                            }}
+                            disabled={isPlayingSlow}
+                            className={`px-6 sm:px-10 py-2.5 sm:py-4 bg-gradient-to-r from-blue-600 to-indigo-600 
+                                       hover:opacity-90 disabled:from-zinc-700 disabled:to-zinc-700
+                                       text-white font-medium text-sm sm:text-lg rounded-xl sm:rounded-2xl 
+                                       transition-all duration-300 shadow-lg flex items-center gap-2 sm:gap-3 active:scale-95`}
+                        >
+                            {isPlayingSlow ? (
+                                <>
+                                    <span className="animate-pulse">🐢</span>
+                                    <span className="text-xs sm:text-base">Đang phát...</span>
+                                </>
+                            ) : (
+                                <>
+                                    <span>🐢</span>
+                                    <span className="text-xs sm:text-base">Nghe chậm</span>
+                                </>
+                            )}
+                        </button>
+
+                        {(isPlaying || isPlayingSlow) && (
                             <button
                                 onClick={(e) => {
                                     e.stopPropagation();
@@ -443,7 +536,7 @@ export default function Flashcard({
                                 }}
                                 className="px-6 sm:px-10 py-2.5 sm:py-4 bg-gradient-to-r from-red-600 to-rose-600 
                                            hover:from-red-500 hover:to-rose-500 text-white font-medium text-sm sm:text-lg 
-                                           rounded-xl sm:rounded-2xl transition-all duration-300 shadow-lg sm:shadow-xl 
+                                           rounded-xl sm:rounded-2xl transition-all duration-300 shadow-lg 
                                            shadow-red-500/40 flex items-center gap-2 sm:gap-3 active:scale-95"
                             >
                                 <span>⏹️</span>
@@ -455,7 +548,8 @@ export default function Flashcard({
             );
         }
 
-        const text = !isReversed ? (card.english || "???") : (card.vietnamese || "???");
+        const text = !isReversed ? (card?.meaning || "???") : (card?.word || "???");
+        const textLang = !isReversed ? 'Tiếng Việt' : langConfig.name;
 
         return (
             <div className="relative h-full flex flex-col items-center justify-center p-6 sm:p-10 text-center">
@@ -463,18 +557,19 @@ export default function Flashcard({
                     {text}
                 </div>
 
-                <div className="flex gap-3 sm:gap-4">
+                <div className="mt-2 text-zinc-500 text-xs mb-4">{textLang}</div>
+
+                <div className="flex flex-wrap gap-3 sm:gap-4 justify-center">
                     <button
                         onClick={(e) => {
                             e.stopPropagation();
-                            handleManualPlayAudio();
+                            handleManualPlayAudio(false);
                         }}
                         disabled={isPlaying}
-                        className="px-6 sm:px-10 py-2.5 sm:py-4 bg-gradient-to-r from-emerald-600 to-teal-600 
-                                   hover:from-emerald-500 hover:to-teal-500 disabled:from-zinc-700 disabled:to-zinc-700
+                        className={`px-6 sm:px-10 py-2.5 sm:py-4 bg-gradient-to-r ${langConfig.color} 
+                                   hover:opacity-90 disabled:from-zinc-700 disabled:to-zinc-700
                                    text-white font-medium text-sm sm:text-lg rounded-xl sm:rounded-2xl 
-                                   transition-all duration-300 shadow-lg sm:shadow-xl shadow-emerald-500/40 
-                                   flex items-center gap-2 sm:gap-3 active:scale-95"
+                                   transition-all duration-300 shadow-lg flex items-center gap-2 sm:gap-3 active:scale-95`}
                     >
                         {isPlaying ? (
                             <>
@@ -488,8 +583,32 @@ export default function Flashcard({
                             </>
                         )}
                     </button>
-                    
-                    {isPlaying && (
+
+                    <button
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            handleManualPlayAudio(true);
+                        }}
+                        disabled={isPlayingSlow}
+                        className={`px-6 sm:px-10 py-2.5 sm:py-4 bg-gradient-to-r from-blue-600 to-indigo-600 
+                                   hover:opacity-90 disabled:from-zinc-700 disabled:to-zinc-700
+                                   text-white font-medium text-sm sm:text-lg rounded-xl sm:rounded-2xl 
+                                   transition-all duration-300 shadow-lg flex items-center gap-2 sm:gap-3 active:scale-95`}
+                    >
+                        {isPlayingSlow ? (
+                            <>
+                                <span className="animate-pulse">🐢</span>
+                                <span className="text-xs sm:text-base">Đang phát...</span>
+                            </>
+                        ) : (
+                            <>
+                                <span>🐢</span>
+                                <span className="text-xs sm:text-base">Nghe chậm</span>
+                            </>
+                        )}
+                    </button>
+
+                    {(isPlaying || isPlayingSlow) && (
                         <button
                             onClick={(e) => {
                                 e.stopPropagation();
@@ -497,7 +616,7 @@ export default function Flashcard({
                             }}
                             className="px-6 sm:px-10 py-2.5 sm:py-4 bg-gradient-to-r from-red-600 to-rose-600 
                                        hover:from-red-500 hover:to-rose-500 text-white font-medium text-sm sm:text-lg 
-                                       rounded-xl sm:rounded-2xl transition-all duration-300 shadow-lg sm:shadow-xl 
+                                       rounded-xl sm:rounded-2xl transition-all duration-300 shadow-lg 
                                        shadow-red-500/40 flex items-center gap-2 sm:gap-3 active:scale-95"
                         >
                             <span>⏹️</span>
@@ -513,7 +632,6 @@ export default function Flashcard({
         );
     };
 
-    // Modal component
     const Modal = () => {
         if (!isModalOpen) return null;
 
@@ -559,16 +677,15 @@ export default function Flashcard({
                                             key={size.value}
                                             onClick={() => handleFontSizeChange(size.value as FontSize)}
                                             className={`py-2 rounded-lg transition-all flex flex-col items-center gap-1 ${fontSize === size.value
-                                                    ? 'bg-emerald-600 text-white'
-                                                    : 'bg-zinc-800 text-zinc-300 hover:bg-zinc-700'
+                                                ? 'bg-emerald-600 text-white'
+                                                : 'bg-zinc-800 text-zinc-300 hover:bg-zinc-700'
                                                 }`}
                                         >
-                                            <span className={`${
-                                                size.value === 'extra_small' ? 'text-xs' :
-                                                size.value === 'small' ? 'text-sm' :
-                                                size.value === 'medium' ? 'text-base' :
-                                                size.value === 'large' ? 'text-lg' : 'text-xl'
-                                            } font-bold`}>{size.icon}</span>
+                                            <span className={`${size.value === 'extra_small' ? 'text-xs' :
+                                                    size.value === 'small' ? 'text-sm' :
+                                                        size.value === 'medium' ? 'text-base' :
+                                                            size.value === 'large' ? 'text-lg' : 'text-xl'
+                                                } font-bold`}>{size.icon}</span>
                                             <span className="text-xs">{size.label}</span>
                                         </button>
                                     ))}
@@ -580,8 +697,8 @@ export default function Flashcard({
                             <button
                                 onClick={handleDictationMode}
                                 className={`w-full px-4 py-3 rounded-xl transition-all text-sm sm:text-base font-medium flex items-center justify-between gap-2 ${isDictationMode
-                                        ? "bg-purple-600 text-white"
-                                        : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700"
+                                    ? "bg-purple-600 text-white"
+                                    : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700"
                                     }`}
                             >
                                 <div className="flex items-center gap-2 sm:gap-3">
@@ -589,8 +706,8 @@ export default function Flashcard({
                                     <span>Chép chính tả</span>
                                 </div>
                                 <div className={`w-5 h-5 rounded-full border-2 transition-all ${isDictationMode
-                                        ? "bg-white border-white"
-                                        : "border-zinc-400"
+                                    ? "bg-white border-white"
+                                    : "border-zinc-400"
                                     }`}>
                                     {isDictationMode && (
                                         <svg className="w-4 h-4 text-purple-600" fill="currentColor" viewBox="0 0 20 20">
@@ -603,8 +720,8 @@ export default function Flashcard({
                             <button
                                 onClick={handleReverseAll}
                                 className={`w-full px-4 py-3 rounded-xl transition-all text-sm sm:text-base font-medium flex items-center justify-between gap-2 ${isReversed
-                                        ? "bg-blue-600 text-white"
-                                        : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700"
+                                    ? "bg-blue-600 text-white"
+                                    : "bg-zinc-800 text-zinc-300 hover:bg-zinc-700"
                                     }`}
                             >
                                 <div className="flex items-center gap-2 sm:gap-3">
@@ -612,8 +729,8 @@ export default function Flashcard({
                                     <span>Đảo ngược thẻ</span>
                                 </div>
                                 <div className={`w-5 h-5 rounded-full border-2 transition-all ${isReversed
-                                        ? "bg-white border-white"
-                                        : "border-zinc-400"
+                                    ? "bg-white border-white"
+                                    : "border-zinc-400"
                                     }`}>
                                     {isReversed && (
                                         <svg className="w-4 h-4 text-blue-600" fill="currentColor" viewBox="0 0 20 20">
@@ -627,8 +744,8 @@ export default function Flashcard({
                                 onClick={handleShuffle}
                                 disabled={isShuffling || totalCards <= 1}
                                 className={`w-full px-4 py-3 rounded-xl transition-all text-sm sm:text-base font-medium flex items-center justify-between gap-2 ${isShuffling || totalCards <= 1
-                                        ? "bg-zinc-800 text-zinc-500 cursor-not-allowed"
-                                        : "bg-orange-600 hover:bg-orange-500 text-white"
+                                    ? "bg-zinc-800 text-zinc-500 cursor-not-allowed"
+                                    : "bg-orange-600 hover:bg-orange-500 text-white"
                                     }`}
                             >
                                 <div className="flex items-center gap-2 sm:gap-3">
@@ -668,14 +785,16 @@ export default function Flashcard({
                                     <span>← →</span>
                                     <span>Thẻ trước/sau</span>
                                     <span>A</span>
-                                    <span>Nghe lại</span>
+                                    <span>Nghe thường</span>
+                                    <span>S</span>
+                                    <span>Nghe chậm</span>
                                     <span>X</span>
                                     <span>Dừng đọc</span>
                                     <span>R</span>
                                     <span>Đảo ngược</span>
                                     <span>D</span>
                                     <span>Chép chính tả</span>
-                                    <span>S</span>
+                                    <span>T</span>
                                     <span>Xáo trộn</span>
                                     <span>ESC</span>
                                     <span>Đóng modal</span>
@@ -761,13 +880,13 @@ export default function Flashcard({
                     </div>
                 </div>
 
-                <div className="grid grid-cols-4 gap-2 sm:gap-4 mt-6 sm:mt-12 px-1 sm:px-2">
+                <div className="grid grid-cols-5 gap-2 sm:gap-4 mt-6 sm:mt-12 px-1 sm:px-2">
                     <button
                         onClick={onPrev}
                         disabled={!hasPrev}
                         className={`py-3 sm:py-4 rounded-xl sm:rounded-2xl font-semibold text-sm sm:text-lg transition-all duration-300 flex items-center justify-center gap-1 sm:gap-2 border ${hasPrev
-                                ? "bg-zinc-900 hover:bg-zinc-800 border-zinc-700 text-white active:scale-95"
-                                : "bg-zinc-950 border-zinc-800 text-zinc-600 cursor-not-allowed"
+                            ? "bg-zinc-900 hover:bg-zinc-800 border-zinc-700 text-white active:scale-95"
+                            : "bg-zinc-950 border-zinc-800 text-zinc-600 cursor-not-allowed"
                             }`}
                     >
                         <span>←</span>
@@ -775,22 +894,33 @@ export default function Flashcard({
                     </button>
 
                     <button
-                        onClick={handleManualPlayAudio}
+                        onClick={() => handleManualPlayAudio(false)}
                         disabled={isPlaying}
-                        className="py-3 sm:py-4 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 
+                        className={`py-3 sm:py-4 bg-gradient-to-r ${langConfig.color} hover:opacity-90 
                                    disabled:from-zinc-700 disabled:to-zinc-700 text-white font-semibold text-sm sm:text-lg rounded-xl sm:rounded-2xl 
-                                   transition-all duration-300 shadow-lg shadow-emerald-500/30 active:scale-95 flex items-center justify-center gap-1 sm:gap-2"
+                                   transition-all duration-300 shadow-lg active:scale-95 flex items-center justify-center gap-1 sm:gap-2`}
                     >
                         <span>🔊</span>
                         <span className="hidden xs:inline">{isPlaying ? "Đang phát" : "Nghe"}</span>
                     </button>
 
                     <button
+                        onClick={() => handleManualPlayAudio(true)}
+                        disabled={isPlayingSlow}
+                        className={`py-3 sm:py-4 bg-gradient-to-r from-blue-600 to-indigo-600 hover:opacity-90 
+                                   disabled:from-zinc-700 disabled:to-zinc-700 text-white font-semibold text-sm sm:text-lg rounded-xl sm:rounded-2xl 
+                                   transition-all duration-300 shadow-lg active:scale-95 flex items-center justify-center gap-1 sm:gap-2`}
+                    >
+                        <span>🐢</span>
+                        <span className="hidden xs:inline">{isPlayingSlow ? "Đang phát" : "Chậm"}</span>
+                    </button>
+
+                    <button
                         onClick={handleStopAudio}
-                        disabled={!isPlaying}
-                        className={`py-3 sm:py-4 rounded-xl sm:rounded-2xl font-semibold text-sm sm:text-lg transition-all duration-300 flex items-center justify-center gap-1 sm:gap-2 border ${isPlaying
-                                ? "bg-red-600 hover:bg-red-500 text-white active:scale-95"
-                                : "bg-zinc-950 border-zinc-800 text-zinc-600 cursor-not-allowed"
+                        disabled={!isPlaying && !isPlayingSlow}
+                        className={`py-3 sm:py-4 rounded-xl sm:rounded-2xl font-semibold text-sm sm:text-lg transition-all duration-300 flex items-center justify-center gap-1 sm:gap-2 border ${(isPlaying || isPlayingSlow)
+                            ? "bg-red-600 hover:bg-red-500 text-white active:scale-95"
+                            : "bg-zinc-950 border-zinc-800 text-zinc-600 cursor-not-allowed"
                             }`}
                     >
                         <span>⏹️</span>
@@ -801,8 +931,8 @@ export default function Flashcard({
                         onClick={onNext}
                         disabled={!hasNext}
                         className={`py-3 sm:py-4 rounded-xl sm:rounded-2xl font-semibold text-sm sm:text-lg transition-all duration-300 flex items-center justify-center gap-1 sm:gap-2 border ${hasNext
-                                ? "bg-zinc-900 hover:bg-zinc-800 border-zinc-700 text-white active:scale-95"
-                                : "bg-zinc-950 border-zinc-800 text-zinc-600 cursor-not-allowed"
+                            ? "bg-zinc-900 hover:bg-zinc-800 border-zinc-700 text-white active:scale-95"
+                            : "bg-zinc-950 border-zinc-800 text-zinc-600 cursor-not-allowed"
                             }`}
                     >
                         <span className="hidden xs:inline">Sau</span>
@@ -811,7 +941,7 @@ export default function Flashcard({
                 </div>
 
                 <div className="text-center mt-6 sm:mt-8 text-zinc-500 text-xs sm:text-sm px-2">
-                    💡 Click ⚙️ để xem tùy chọn và phím tắt (X: Dừng đọc)
+                    💡 Phím tắt: A (nghe), S (nghe chậm), X (dừng), Space (lật), ← → (thẻ trước/sau)
                 </div>
             </div>
         </div>
