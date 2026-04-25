@@ -1,5 +1,5 @@
 // app/types/index.ts
-export type Language = 'english' | 'korean' | 'japanese' | 'chinese' | 'russian';
+export type Language = 'english' | 'korean' | 'japanese' | 'chinese' | 'russian' | 'german';
 
 export interface VocabularyCard {
     id: string;
@@ -29,6 +29,7 @@ export const LANGUAGES: LanguageConfig[] = [
     { code: 'japanese', name: 'Tiếng Nhật', flag: '🇯🇵', nativeName: '日本語', ttsLang: 'ja-JP', sheetName: 'Japanese', direction: 'ltr', color: 'from-purple-600 to-indigo-600' },
     { code: 'chinese', name: 'Tiếng Trung', flag: '🇨🇳', nativeName: '中文', ttsLang: 'zh-CN', sheetName: 'Chinese', direction: 'ltr', color: 'from-red-700 to-orange-600' },
     { code: 'russian', name: 'Tiếng Nga', flag: '🇷🇺', nativeName: 'Русский', ttsLang: 'ru-RU', sheetName: 'Russian', direction: 'ltr', color: 'from-gray-600 to-gray-800' },
+    { code: 'german', name: 'Tiếng Đức', flag: '🇩🇪', nativeName: 'Deutsch', ttsLang: 'de-DE', sheetName: 'German', direction: 'ltr', color: 'from-yellow-600 to-amber-600' },
 ];
 
 export const SHEET_HEADERS: string[] = [
